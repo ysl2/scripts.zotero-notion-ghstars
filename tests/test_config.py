@@ -134,6 +134,29 @@ class TestGithubFallbackHelpers(unittest.TestCase):
         payload = {"resources": [{"url": "https://example.com/project"}], "title": "paper"}
         self.assertIsNone(main.find_github_url_in_json_payload(payload))
 
+    def test_find_github_url_in_alphaxiv_implementations_payload_prefers_github_resources(self):
+        payload = {
+            "alphaXivImplementations": [],
+            "paperResources": [
+                {"type": "dataset", "url": "https://example.com/dataset"},
+                {"type": "github", "url": "https://github.com/foo/bar"},
+            ],
+        }
+        self.assertEqual(
+            main.find_github_url_in_alphaxiv_implementations_payload(payload),
+            "https://github.com/foo/bar",
+        )
+
+    def test_find_github_url_in_alphaxiv_implementations_payload_falls_back_to_recursive_scan(self):
+        payload = {
+            "alphaXivImplementations": [{"url": "https://github.com/baz/qux."}],
+            "paperResources": [],
+        }
+        self.assertEqual(
+            main.find_github_url_in_alphaxiv_implementations_payload(payload),
+            "https://github.com/baz/qux",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

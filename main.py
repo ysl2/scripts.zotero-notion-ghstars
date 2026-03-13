@@ -167,6 +167,27 @@ def find_github_url_in_json_payload(payload):
     return None
 
 
+def find_github_url_in_alphaxiv_implementations_payload(payload):
+    """优先从 AlphaXiv implementations payload 的结构化字段中提取 GitHub URL"""
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ('paperResources', 'alphaXivImplementations'):
+        items = payload.get(key, [])
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_type = str(item.get('type', '')).lower()
+                url = item.get('url')
+                if item_type == 'github' and url:
+                    normalized = normalize_github_url(url)
+                    if normalized:
+                        return normalized
+
+    return find_github_url_in_json_payload(payload)
+
+
 ABSTRACT_PROPERTY_CANDIDATES = ('Abstract', 'Summary', 'TL;DR', 'Notes')
 ARXIV_PROPERTY_CANDIDATES = ('Arxiv', 'arXiv', 'Paper URL', 'URL', 'Link')
 
@@ -267,10 +288,18 @@ MINOR_SKIP_REASONS = {
     'Unsupported Github field content',
     'Missing ALPHAXIV_API_KEY',
     'No arXiv ID found for AlphaXiv API lookup',
+    'No AlphaXiv groupId found for implementations lookup',
     'No Github URL found in AlphaXiv API',
     'Discovered URL is not a valid GitHub repository',
 }
-MINOR_SKIP_REASON_PREFIXES = ('AlphaXiv API error', 'AlphaXiv API timeout', 'AlphaXiv API request failed:')
+MINOR_SKIP_REASON_PREFIXES = (
+    'AlphaXiv API error',
+    'AlphaXiv API timeout',
+    'AlphaXiv API request failed:',
+    'AlphaXiv implementations API error',
+    'AlphaXiv implementations API timeout',
+    'AlphaXiv implementations API request failed:',
+)
 
 
 def is_minor_skip_reason(reason: str) -> bool:
@@ -307,12 +336,12 @@ class GitHubClient:
         self.rate_limit_remaining = None
         self.rate_limit_reset = None
 
-    async def get_alphaxiv_paper(self, arxiv_id: str):
+    async def get_alphaxiv_paper(self, unresolved: str):
         """通过 AlphaXiv API 获取论文 JSON 数据"""
         if not self.alphaxiv_api_key:
             return None, 'Missing ALPHAXIV_API_KEY'
 
-        url = f'https://api-dev.alphaxiv.org/papers/v3/{arxiv_id}'
+        url = f'https://api-dev.alphaxiv.org/papers/v3/{unresolved}'
         headers = get_alphaxiv_headers(self.alphaxiv_api_key)
 
         async with self.semaphore:
@@ -326,6 +355,26 @@ class GitHubClient:
                 return None, 'AlphaXiv API timeout'
             except Exception as e:
                 return None, f'AlphaXiv API request failed: {e}'
+
+    async def get_alphaxiv_implementations(self, group_id: str):
+        """通过 AlphaXiv API 获取论文 implementations / paperResources 数据"""
+        if not self.alphaxiv_api_key:
+            return None, 'Missing ALPHAXIV_API_KEY'
+
+        url = f'https://api-dev.alphaxiv.org/papers/v3/{group_id}/implementations'
+        headers = get_alphaxiv_headers(self.alphaxiv_api_key)
+
+        async with self.semaphore:
+            await self.rate_limiter.acquire()
+            try:
+                async with self.session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        return await response.json(), None
+                    return None, f'AlphaXiv implementations API error ({response.status})'
+            except asyncio.TimeoutError:
+                return None, 'AlphaXiv implementations API timeout'
+            except Exception as e:
+                return None, f'AlphaXiv implementations API request failed: {e}'
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(headers=get_github_headers(self.github_token))
@@ -463,11 +512,23 @@ async def discover_github_url_from_alphaxiv_api(page: dict, github_client: GitHu
     if not arxiv_id:
         return None, 'No arXiv ID found for AlphaXiv API lookup'
 
-    payload, error = await github_client.get_alphaxiv_paper(arxiv_id)
+    paper_payload, error = await github_client.get_alphaxiv_paper(arxiv_id)
     if error:
         return None, error
 
-    github_url = find_github_url_in_json_payload(payload)
+    github_url = find_github_url_in_json_payload(paper_payload)
+    if github_url:
+        return github_url, None
+
+    group_id = paper_payload.get('groupId') if isinstance(paper_payload, dict) else None
+    if not group_id:
+        return None, 'No AlphaXiv groupId found for implementations lookup'
+
+    implementations_payload, implementations_error = await github_client.get_alphaxiv_implementations(group_id)
+    if implementations_error:
+        return None, implementations_error
+
+    github_url = find_github_url_in_alphaxiv_implementations_payload(implementations_payload)
     if github_url:
         return github_url, None
     return None, 'No Github URL found in AlphaXiv API'

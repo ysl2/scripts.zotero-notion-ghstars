@@ -98,7 +98,7 @@ uv run python main.py
 2. **Database Query**: Fetches pages from the data source
 3. **Concurrent Processing**: For each page:
    - If `Github` is a valid GitHub repo URL, fetches star count and updates `Github stars`
-   - If `Github` is empty or `WIP`, extracts the arXiv ID and queries the AlphaXiv API for repository information
+   - If `Github` is empty or `WIP`, extracts the arXiv ID, queries AlphaXiv paper metadata to get the `groupId`, then queries AlphaXiv implementations/resources for repository information
    - If AlphaXiv API discovery succeeds, updates both `Github` and `Github stars`
    - If `Github` contains any other non-empty value, leaves the row unchanged
 4. **Results Summary**: Displays updated count and skipped items with reasons
