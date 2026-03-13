@@ -7,7 +7,7 @@ A Python script that automatically updates GitHub repository star counts in your
 ## Features
 
 - **Automatic Star Count Updates**: Fetches the latest star counts for GitHub repositories stored in Notion
-- **Fallback GitHub Discovery**: For rows whose `Github` field is empty or `WIP`, tries to discover the repo through the AlphaXiv API
+- **Fallback GitHub Discovery**: For rows whose `Github` field is empty or `WIP`, tries to discover the repo through the AlphaXiv legacy API using the arXiv URL in your Notion `URL` column
 - **Concurrent Processing**: Uses async/await for efficient parallel API requests
 - **Rate Limiting**: Built-in rate limiting to respect API quotas for both GitHub and Notion
 - **GitHub Token Support**: Optional GitHub authentication for higher rate limits (5000 vs 60 requests/hour)
@@ -53,7 +53,7 @@ Your Notion database must have these properties:
 - **Github stars** (Number type): Star count (will be updated by the script)
 
 Optional but recommended properties for fallback discovery:
-- **Arxiv** / **arXiv** / **Paper URL** / **URL** / **Link**: a field containing the arXiv URL, used for AlphaXiv API fallback
+- **URL** (preferred), or **Arxiv** / **arXiv** / **Paper URL** / **Link**: a field containing the arXiv URL, used for AlphaXiv legacy API fallback
 
 ### 3. Set Environment Variables
 
@@ -98,7 +98,8 @@ uv run python main.py
 2. **Database Query**: Fetches pages from the data source
 3. **Concurrent Processing**: For each page:
    - If `Github` is a valid GitHub repo URL, fetches star count and updates `Github stars`
-   - If `Github` is empty or `WIP`, extracts the arXiv ID, queries AlphaXiv paper metadata to get the `groupId`, then queries AlphaXiv implementations/resources for repository information
+   - If `Github` is empty or `WIP`, extracts the arXiv ID from the Notion `URL`-style field and queries `https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}`
+   - The script looks for GitHub links in legacy fields like `paper.implementation`, `paper.marimo_implementation`, `paper.paper_group.resources`, `paper.resources`, then falls back to recursive scanning of the returned JSON
    - If AlphaXiv API discovery succeeds, updates both `Github` and `Github stars`
    - If `Github` contains any other non-empty value, leaves the row unchanged
 4. **Results Summary**: Displays updated count and skipped items with reasons

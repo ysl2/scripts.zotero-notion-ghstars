@@ -134,26 +134,34 @@ class TestGithubFallbackHelpers(unittest.TestCase):
         payload = {"resources": [{"url": "https://example.com/project"}], "title": "paper"}
         self.assertIsNone(main.find_github_url_in_json_payload(payload))
 
-    def test_find_github_url_in_alphaxiv_implementations_payload_prefers_github_resources(self):
+    def test_find_github_url_in_alphaxiv_legacy_payload_prefers_known_fields(self):
         payload = {
-            "alphaXivImplementations": [],
-            "paperResources": [
-                {"type": "dataset", "url": "https://example.com/dataset"},
-                {"type": "github", "url": "https://github.com/foo/bar"},
-            ],
+            "paper": {
+                "implementation": "https://github.com/foo/bar",
+                "marimo_implementation": None,
+                "paper_group": {"resources": []},
+                "resources": [],
+            }
         }
         self.assertEqual(
-            main.find_github_url_in_alphaxiv_implementations_payload(payload),
+            main.find_github_url_in_alphaxiv_legacy_payload(payload),
             "https://github.com/foo/bar",
         )
 
-    def test_find_github_url_in_alphaxiv_implementations_payload_falls_back_to_recursive_scan(self):
+    def test_find_github_url_in_alphaxiv_legacy_payload_falls_back_to_recursive_scan(self):
         payload = {
-            "alphaXivImplementations": [{"url": "https://github.com/baz/qux."}],
-            "paperResources": [],
+            "paper": {
+                "implementation": None,
+                "marimo_implementation": None,
+                "paper_group": {"resources": []},
+                "resources": [],
+            },
+            "misc": {
+                "links": ["https://github.com/baz/qux."]
+            }
         }
         self.assertEqual(
-            main.find_github_url_in_alphaxiv_implementations_payload(payload),
+            main.find_github_url_in_alphaxiv_legacy_payload(payload),
             "https://github.com/baz/qux",
         )
 
