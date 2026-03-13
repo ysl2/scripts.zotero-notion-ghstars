@@ -148,6 +148,25 @@ def get_text_from_property(prop: dict):
     return None
 
 
+def find_github_url_in_json_payload(payload):
+    """递归扫描 JSON 样式 payload，寻找第一个合法 GitHub 仓库链接"""
+    if isinstance(payload, str):
+        return find_github_url_in_text(payload)
+    if isinstance(payload, list):
+        for item in payload:
+            result = find_github_url_in_json_payload(item)
+            if result:
+                return result
+        return None
+    if isinstance(payload, dict):
+        for value in payload.values():
+            result = find_github_url_in_json_payload(value)
+            if result:
+                return result
+        return None
+    return None
+
+
 ABSTRACT_PROPERTY_CANDIDATES = ('Abstract', 'Summary', 'TL;DR', 'Notes')
 ARXIV_PROPERTY_CANDIDATES = ('Arxiv', 'arXiv', 'Paper URL', 'URL', 'Link')
 
@@ -203,6 +222,7 @@ def load_config_from_env(env: dict[str, str]) -> dict[str, str]:
     """从环境变量读取配置并校验必填项"""
     notion_token = (env.get('NOTION_TOKEN') or '').strip()
     github_token = (env.get('GITHUB_TOKEN') or '').strip()
+    alphaxiv_api_key = (env.get('ALPHAXIV_API_KEY') or '').strip()
     database_id = (env.get('DATABASE_ID') or '').strip()
 
     missing = []
@@ -218,6 +238,7 @@ def load_config_from_env(env: dict[str, str]) -> dict[str, str]:
     return {
         'notion_token': notion_token,
         'github_token': github_token,
+        'alphaxiv_api_key': alphaxiv_api_key,
         'database_id': database_id,
     }
 
@@ -230,19 +251,26 @@ def get_github_headers(github_token: str):
     return headers
 
 
+def get_alphaxiv_headers(alphaxiv_api_key: str):
+    """获取 AlphaXiv API 请求头"""
+    headers = {'Accept': 'application/json', 'User-Agent': 'notion-github-stars-updater'}
+    if alphaxiv_api_key:
+        headers['X-API-Key'] = alphaxiv_api_key
+    return headers
+
+
 # 不重要的跳过原因（显示为灰色）
 MINOR_SKIP_REASONS = {
     'Invalid Github URL format',
     'No Github URL found',
     'Cannot extract owner/repo',
     'Unsupported Github field content',
-    'No abstract text found',
-    'No Github URL found in abstract',
-    'No arXiv ID found for AlphaXiv lookup',
-    'No Github URL found in AlphaXiv',
+    'Missing ALPHAXIV_API_KEY',
+    'No arXiv ID found for AlphaXiv API lookup',
+    'No Github URL found in AlphaXiv API',
     'Discovered URL is not a valid GitHub repository',
 }
-MINOR_SKIP_REASON_PREFIXES = ('AlphaXiv lookup failed:',)
+MINOR_SKIP_REASON_PREFIXES = ('AlphaXiv API error', 'AlphaXiv API timeout', 'AlphaXiv API request failed:')
 
 
 def is_minor_skip_reason(reason: str) -> bool:
@@ -268,29 +296,36 @@ class RateLimiter:
 
 
 class GitHubClient:
-    """GitHub API 异步客户端，带有并发和速率限制"""
+    """外部 HTTP 异步客户端，复用 GitHub 速率限制设置"""
 
-    def __init__(self, max_concurrent: int, min_interval: float, github_token: str):
+    def __init__(self, max_concurrent: int, min_interval: float, github_token: str, alphaxiv_api_key: str = ''):
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.rate_limiter = RateLimiter(min_interval)
         self.github_token = github_token
+        self.alphaxiv_api_key = alphaxiv_api_key
         self.session = None
         self.rate_limit_remaining = None
         self.rate_limit_reset = None
 
-    async def get_text(self, url: str):
-        """获取文本页面内容（用于摘要/AlphaXiv 等回退发现）"""
+    async def get_alphaxiv_paper(self, arxiv_id: str):
+        """通过 AlphaXiv API 获取论文 JSON 数据"""
+        if not self.alphaxiv_api_key:
+            return None, 'Missing ALPHAXIV_API_KEY'
+
+        url = f'https://api-dev.alphaxiv.org/papers/v3/{arxiv_id}'
+        headers = get_alphaxiv_headers(self.alphaxiv_api_key)
+
         async with self.semaphore:
             await self.rate_limiter.acquire()
             try:
-                async with self.session.get(url) as response:
+                async with self.session.get(url, headers=headers) as response:
                     if response.status == 200:
-                        return await response.text(), None
-                    return None, f'HTTP error ({response.status})'
+                        return await response.json(), None
+                    return None, f'AlphaXiv API error ({response.status})'
             except asyncio.TimeoutError:
-                return None, 'Request timeout'
+                return None, 'AlphaXiv API timeout'
             except Exception as e:
-                return None, f'Request failed: {e}'
+                return None, f'AlphaXiv API request failed: {e}'
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession(headers=get_github_headers(self.github_token))
@@ -422,33 +457,20 @@ class NotionClient:
 
 
 
-async def discover_github_url_from_abstract(page: dict):
-    """从页面摘要中发现 GitHub 仓库链接"""
-    abstract_text = get_abstract_text_from_page(page)
-    if not abstract_text:
-        return None, 'No abstract text found'
-
-    github_url = find_github_url_in_text(abstract_text)
-    if github_url:
-        return github_url, None
-    return None, 'No Github URL found in abstract'
-
-
-async def discover_github_url_from_alphaxiv(page: dict, github_client: GitHubClient):
-    """从 AlphaXiv resources 页面中发现 GitHub 仓库链接"""
+async def discover_github_url_from_alphaxiv_api(page: dict, github_client: GitHubClient):
+    """从 AlphaXiv API 中发现 GitHub 仓库链接"""
     arxiv_id = get_arxiv_id_from_page(page)
     if not arxiv_id:
-        return None, 'No arXiv ID found for AlphaXiv lookup'
+        return None, 'No arXiv ID found for AlphaXiv API lookup'
 
-    alphaxiv_url = f'https://www.alphaxiv.org/resources/{arxiv_id}'
-    body, error = await github_client.get_text(alphaxiv_url)
+    payload, error = await github_client.get_alphaxiv_paper(arxiv_id)
     if error:
-        return None, f'AlphaXiv lookup failed: {error}'
+        return None, error
 
-    github_url = find_github_url_in_text(body)
+    github_url = find_github_url_in_json_payload(payload)
     if github_url:
         return github_url, None
-    return None, 'No Github URL found in AlphaXiv'
+    return None, 'No Github URL found in AlphaXiv API'
 
 
 async def resolve_repo_for_page(page: dict, github_client: GitHubClient):
@@ -472,20 +494,11 @@ async def resolve_repo_for_page(page: dict, github_client: GitHubClient):
             'reason': 'Unsupported Github field content',
         }
 
-    github_url, error = await discover_github_url_from_abstract(page)
+    github_url, error = await discover_github_url_from_alphaxiv_api(page, github_client)
     if github_url:
         return {
             'github_url': github_url,
-            'source': 'abstract',
-            'needs_github_update': True,
-            'reason': None,
-        }
-
-    github_url, alphaxiv_error = await discover_github_url_from_alphaxiv(page, github_client)
-    if github_url:
-        return {
-            'github_url': github_url,
-            'source': 'alphaxiv',
+            'source': 'alphaxiv_api',
             'needs_github_update': True,
             'reason': None,
         }
@@ -494,7 +507,7 @@ async def resolve_repo_for_page(page: dict, github_client: GitHubClient):
         'github_url': None,
         'source': None,
         'needs_github_update': False,
-        'reason': alphaxiv_error or error or 'No Github URL found',
+        'reason': error or 'No Github URL found',
     }
 
 
@@ -556,7 +569,7 @@ async def process_page(
     async with lock:
         print(f'[{index}/{total}] {title}')
         current_stars_display = current_stars if current_stars is not None else 'N/A'
-        source_label = {'existing': 'existing Github', 'abstract': 'abstract fallback', 'alphaxiv': 'AlphaXiv fallback'}.get(
+        source_label = {'existing': 'existing Github', 'alphaxiv_api': 'AlphaXiv API fallback'}.get(
             resolution['source'], 'unknown source'
         )
         print(f'  📍 {owner}/{repo} | Current stars: {current_stars_display}')
@@ -597,7 +610,7 @@ async def main():
     print(f'⚙️ Request interval: {REQUEST_DELAY}s')
     print()
 
-    async with GitHubClient(GITHUB_CONCURRENT_LIMIT, REQUEST_DELAY, github_token) as github_client:
+    async with GitHubClient(GITHUB_CONCURRENT_LIMIT, REQUEST_DELAY, github_token, config['alphaxiv_api_key']) as github_client:
         async with NotionClient(notion_token, NOTION_CONCURRENT_LIMIT) as notion_client:
             # 检查 rate limit
             rate_info = await github_client.check_rate_limit()

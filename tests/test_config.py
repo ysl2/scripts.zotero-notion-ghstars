@@ -39,11 +39,13 @@ class TestConfigLoading(unittest.TestCase):
             "NOTION_TOKEN": "notion_xxx",
             "GITHUB_TOKEN": "ghp_xxx",
             "DATABASE_ID": "db_123",
+            "ALPHAXIV_API_KEY": "axv1_test",
         }
         cfg = main.load_config_from_env(env)
         self.assertEqual(cfg["notion_token"], "notion_xxx")
         self.assertEqual(cfg["github_token"], "ghp_xxx")
         self.assertEqual(cfg["database_id"], "db_123")
+        self.assertEqual(cfg["alphaxiv_api_key"], "axv1_test")
 
 
 class TestGithubFallbackHelpers(unittest.TestCase):
@@ -65,7 +67,7 @@ class TestGithubFallbackHelpers(unittest.TestCase):
 
     def test_minor_skip_reason_includes_unsupported_and_alphaxiv_failures(self):
         self.assertTrue(main.is_minor_skip_reason("Unsupported Github field content"))
-        self.assertTrue(main.is_minor_skip_reason("AlphaXiv lookup failed: HTTP error (500)"))
+        self.assertTrue(main.is_minor_skip_reason("AlphaXiv API error (500)"))
 
     def test_extract_arxiv_id_from_url(self):
         self.assertEqual(main.extract_arxiv_id_from_url("https://arxiv.org/abs/2601.22135"), "2601.22135")
@@ -103,6 +105,34 @@ class TestGithubFallbackHelpers(unittest.TestCase):
             }
         }
         self.assertEqual(main.get_abstract_text_from_page(page), "abstract text")
+
+    def test_find_github_url_in_json_payload(self):
+        payload = {
+            "resources": [
+                {"name": "homepage", "url": "https://example.com/project"},
+                {"name": "code", "url": "https://github.com/foo/bar"},
+            ]
+        }
+        self.assertEqual(main.find_github_url_in_json_payload(payload), "https://github.com/foo/bar")
+
+    def test_find_github_url_in_json_payload_nested(self):
+        payload = {
+            "data": {
+                "paper": {
+                    "implementation": {
+                        "links": [
+                            "https://example.com",
+                            "https://github.com/baz/qux."
+                        ]
+                    }
+                }
+            }
+        }
+        self.assertEqual(main.find_github_url_in_json_payload(payload), "https://github.com/baz/qux")
+
+    def test_find_github_url_in_json_payload_returns_none_when_missing(self):
+        payload = {"resources": [{"url": "https://example.com/project"}], "title": "paper"}
+        self.assertIsNone(main.find_github_url_in_json_payload(payload))
 
 
 if __name__ == "__main__":

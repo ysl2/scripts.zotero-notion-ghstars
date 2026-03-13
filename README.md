@@ -7,7 +7,7 @@ A Python script that automatically updates GitHub repository star counts in your
 ## Features
 
 - **Automatic Star Count Updates**: Fetches the latest star counts for GitHub repositories stored in Notion
-- **Fallback GitHub Discovery**: For rows whose `Github` field is empty or `WIP`, tries to discover the repo from the abstract first, then AlphaXiv resources
+- **Fallback GitHub Discovery**: For rows whose `Github` field is empty or `WIP`, tries to discover the repo through the AlphaXiv API
 - **Concurrent Processing**: Uses async/await for efficient parallel API requests
 - **Rate Limiting**: Built-in rate limiting to respect API quotas for both GitHub and Notion
 - **GitHub Token Support**: Optional GitHub authentication for higher rate limits (5000 vs 60 requests/hour)
@@ -53,8 +53,7 @@ Your Notion database must have these properties:
 - **Github stars** (Number type): Star count (will be updated by the script)
 
 Optional but recommended properties for fallback discovery:
-- **Abstract** / **Summary** / **TL;DR** / **Notes**: text fields that may contain the paper abstract
-- **Arxiv** / **arXiv** / **Paper URL** / **URL** / **Link**: a field containing the arXiv URL, used for AlphaXiv fallback
+- **Arxiv** / **arXiv** / **Paper URL** / **URL** / **Link**: a field containing the arXiv URL, used for AlphaXiv API fallback
 
 ### 3. Set Environment Variables
 
@@ -69,6 +68,9 @@ DATABASE_ID=your_database_id_here
 
 # Optional: Your GitHub Personal Access Token (for higher rate limits)
 GITHUB_TOKEN=your_github_token_here
+
+# Optional but required if you want AlphaXiv fallback discovery for empty/WIP Github fields
+ALPHAXIV_API_KEY=your_alphaxiv_api_key_here
 ```
 
 To find your database ID:
@@ -96,10 +98,8 @@ uv run python main.py
 2. **Database Query**: Fetches pages from the data source
 3. **Concurrent Processing**: For each page:
    - If `Github` is a valid GitHub repo URL, fetches star count and updates `Github stars`
-   - If `Github` is empty or `WIP`, tries fallback discovery in this order:
-     1. Search the abstract text for a GitHub repo URL
-     2. Search `https://www.alphaxiv.org/resources/<arxiv_id>` for a GitHub repo URL
-   - If discovery succeeds, updates both `Github` and `Github stars`
+   - If `Github` is empty or `WIP`, extracts the arXiv ID and queries the AlphaXiv API for repository information
+   - If AlphaXiv API discovery succeeds, updates both `Github` and `Github stars`
    - If `Github` contains any other non-empty value, leaves the row unchanged
 4. **Results Summary**: Displays updated count and skipped items with reasons
 
@@ -182,10 +182,9 @@ Skipped items are categorized into two types:
 
 ### Minor (shown in gray)
 - Unsupported Github field content
-- No abstract text found
-- No Github URL found in abstract
-- No arXiv ID found for AlphaXiv lookup
-- No Github URL found in AlphaXiv
+- Missing ALPHAXIV_API_KEY
+- No arXiv ID found for AlphaXiv API lookup
+- No Github URL found in AlphaXiv API
 - Discovered URL is not a valid GitHub repository
 
 These can typically be ignored (e.g., rows intentionally left without code links, or non-GitHub values you want to preserve).
