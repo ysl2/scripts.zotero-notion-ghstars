@@ -1,5 +1,7 @@
 import os
 import sys
+import tempfile
+import textwrap
 import types
 import unittest
 
@@ -74,6 +76,30 @@ class TestGithubFallbackHelpers(unittest.TestCase):
         self.assertEqual(main.extract_arxiv_id_from_url("https://arxiv.org/pdf/2601.22135"), "2601.22135")
         self.assertIsNone(main.extract_arxiv_id_from_url("https://example.com/paper"))
 
+    def test_extract_best_arxiv_id_from_feed(self):
+        feed = textwrap.dedent(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry>
+                <id>https://arxiv.org/abs/2603.99999v1</id>
+                <title>Another Paper</title>
+              </entry>
+              <entry>
+                <id>https://arxiv.org/abs/2603.05078v1</id>
+                <title>MoRe: Motion-aware Feed-forward 4D Reconstruction Transformer</title>
+              </entry>
+            </feed>
+            """
+        ).strip()
+        self.assertEqual(
+            main.extract_best_arxiv_id_from_feed(
+                feed,
+                "MoRe: Motion-aware Feed-forward 4D Reconstruction Transformer",
+            ),
+            "2603.05078",
+        )
+
     def test_get_text_from_property(self):
         rich_text_property = {
             "type": "rich_text",
@@ -105,6 +131,14 @@ class TestGithubFallbackHelpers(unittest.TestCase):
             }
         }
         self.assertEqual(main.get_abstract_text_from_page(page), "abstract text")
+
+    def test_get_page_title_falls_back_to_title_property(self):
+        page = {
+            "properties": {
+                "Title": {"type": "title", "title": [{"plain_text": "Fallback Title"}]},
+            }
+        }
+        self.assertEqual(main.get_page_title(page), "Fallback Title")
 
     def test_find_github_url_in_json_payload(self):
         payload = {

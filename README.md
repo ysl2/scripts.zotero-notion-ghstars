@@ -98,7 +98,9 @@ uv run python main.py
 2. **Database Query**: Fetches pages from the data source
 3. **Concurrent Processing**: For each page:
    - If `Github` is a valid GitHub repo URL, fetches star count and updates `Github stars`
-   - If `Github` is empty or `WIP`, extracts the arXiv ID from the Notion `URL`-style field and queries `https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}`
+   - If `Github` is empty or `WIP`, the script first tries to extract an arXiv ID from the Notion `URL`-style field
+   - If the URL field is not an arXiv link, the script falls back to searching arXiv by the paper title to recover the best-matching arXiv ID
+   - Once an arXiv ID is available, it queries `https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}`
    - The script looks for GitHub links in legacy fields like `paper.implementation`, `paper.marimo_implementation`, `paper.paper_group.resources`, `paper.resources`, then falls back to recursive scanning of the returned JSON
    - If AlphaXiv API discovery succeeds, updates both `Github` and `Github stars`
    - If `Github` contains any other non-empty value, leaves the row unchanged
