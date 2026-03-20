@@ -1,4 +1,4 @@
-# Zotero Notion (Notero) GitHub Stars Updater
+# Zotero Notion (Notero) Stars Updater
 
 A Python script that automatically updates GitHub repository star counts in your Notion database. It fetches the latest star counts from GitHub API and updates your Notion pages with the current data.
 
@@ -50,7 +50,7 @@ Your Notion database must have these properties:
 
 - **Name** (Title type): Page title
 - **Github** (URL or Rich Text type): GitHub repository URL or `WIP`
-- **Github stars** (Number type): Star count (will be updated by the script)
+- **Stars** (Number type): Star count (will be updated by the script)
 
 Optional but recommended properties for fallback discovery:
 - **URL** (preferred), or **Arxiv** / **arXiv** / **Paper URL** / **Link**: a field containing the arXiv URL, used for AlphaXiv legacy API fallback
@@ -97,13 +97,13 @@ uv run python main.py
 1. **Authentication Check**: Verifies GitHub Token status and rate limits
 2. **Database Query**: Fetches pages from the data source
 3. **Concurrent Processing**: For each page:
-   - If `Github` is a valid GitHub repo URL, fetches star count and updates `Github stars`
+   - If `Github` is a valid GitHub repo URL, fetches star count and updates `Stars`
    - If `Github` is empty or `WIP`, the script first tries to extract an arXiv ID from the Notion `URL`-style field
    - If the URL field is not an arXiv link, the script falls back to searching arXiv by the paper title to recover the best-matching arXiv ID
    - Once an arXiv ID is available, it queries `https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}`
    - The script looks for GitHub links in legacy fields like `paper.implementation`, `paper.marimo_implementation`, `paper.paper_group.resources`, `paper.resources`, then falls back to recursive scanning of the returned JSON
    - External HTTP requests use explicit timeouts and limited retries for transient failures like `429` / `502` / `503` / `504`
-   - If AlphaXiv API discovery succeeds, updates both `Github` and `Github stars`
+   - If AlphaXiv API discovery succeeds, updates both `Github` and `Stars`
    - If `Github` contains any other non-empty value, leaves the row unchanged
 4. **Results Summary**: Displays updated count and skipped items with reasons
 

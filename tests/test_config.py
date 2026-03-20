@@ -141,6 +141,14 @@ class TestGithubFallbackHelpers(unittest.TestCase):
         }
         self.assertEqual(main.get_page_title(page), "Fallback Title")
 
+    def test_get_current_stars_from_page_reads_stars_property(self):
+        page = {
+            "properties": {
+                "Stars": {"type": "number", "number": 17},
+            }
+        }
+        self.assertEqual(main.get_current_stars_from_page(page), 17)
+
     def test_find_github_url_in_json_payload(self):
         payload = {
             "resources": [
@@ -202,6 +210,21 @@ class TestGithubFallbackHelpers(unittest.TestCase):
 
 
 class TestNotionResilience(unittest.IsolatedAsyncioTestCase):
+    async def test_update_page_properties_writes_stars_property(self):
+        client = main.NotionClient("token", 1)
+        client.client = types.SimpleNamespace(
+            pages=types.SimpleNamespace(
+                update=AsyncMock(return_value={"ok": True})
+            )
+        )
+
+        await client.update_page_properties("page-1", stars_count=42)
+
+        client.client.pages.update.assert_awaited_once_with(
+            page_id="page-1",
+            properties={"Stars": {"number": 42}},
+        )
+
     async def test_update_page_properties_retries_after_connect_error(self):
         client = main.NotionClient("token", 1)
         client.client = types.SimpleNamespace(
@@ -221,7 +244,7 @@ class TestNotionResilience(unittest.IsolatedAsyncioTestCase):
             "properties": {
                 "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
                 "Github": {"type": "url", "url": "https://github.com/foo/bar"},
-                "Github stars": {"type": "number", "number": 10},
+                "Stars": {"type": "number", "number": 10},
             },
         }
         github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(12, None)))

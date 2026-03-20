@@ -2,7 +2,7 @@
 
 **Goal:** Replace the current fallback discovery chain so pages with empty or `WIP` `Github` values discover repository links only through AlphaXiv's API, not by scanning arXiv abstract text or scraping AlphaXiv HTML pages.
 
-**Architecture:** Keep the single-entry per-page processing pipeline, but narrow the fallback resolution path. Existing valid GitHub URLs continue to use the same star refresh path. Empty/`WIP` rows will extract an arXiv id, call the AlphaXiv API using an API key from environment, inspect the API response for implementation/resource URLs, and if a valid GitHub repository is found, update both `Github` and `Github stars`.
+**Architecture:** Keep the single-entry per-page processing pipeline, but narrow the fallback resolution path. Existing valid GitHub URLs continue to use the same star refresh path. Empty/`WIP` rows will extract an arXiv id, call the AlphaXiv API using an API key from environment, inspect the API response for implementation/resource URLs, and if a valid GitHub repository is found, update both `Github` and `Stars`.
 
 **Scope / Rules:**
 - Existing valid GitHub repository URLs stay on the current direct star-update path.
@@ -25,8 +25,8 @@
 4. Extract owner/repo from the final GitHub URL.
 5. Query GitHub API for stars.
 6. Update Notion:
-   - existing GitHub URL → update `Github stars` only
-   - AlphaXiv-discovered GitHub URL → update `Github` + `Github stars`
+   - existing GitHub URL → update `Stars` only
+   - AlphaXiv-discovered GitHub URL → update `Github` + `Stars`
 
 ## Candidate API Sources
 

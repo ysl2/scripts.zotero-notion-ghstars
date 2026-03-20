@@ -86,8 +86,8 @@ Use the existing aiohttp session from `GitHubClient` when practical, or a shared
 **Step 2: Generalize Notion updates**
 
 Replace the narrow `update_github_stars()` call path with a generic page property update helper that can update:
-- only `Github stars`
-- or both `Github` and `Github stars`
+- only `Stars`
+- or both `Github` and `Stars`
 
 **Step 3: Sanity-run tests**
 

@@ -1,6 +1,6 @@
 # GitHub Fallback Discovery Design
 
-**Goal:** Extend the current Notion → GitHub stars updater so pages whose `Github` property is empty or `WIP` can automatically discover a repository URL from the paper abstract first, then from AlphaXiv resources, and update both `Github` and `Github stars` when discovery succeeds.
+**Goal:** Extend the current Notion → stars updater so pages whose `Github` property is empty or `WIP` can automatically discover a repository URL from the paper abstract first, then from AlphaXiv resources, and update both `Github` and `Stars` when discovery succeeds.
 
 **Architecture:** Refactor the per-page processing flow into a single repo-resolution pipeline. Existing valid GitHub URLs continue through the same star update path; only empty/`WIP` values enter fallback discovery. The pipeline resolves a final repository candidate first, then runs the existing GitHub star lookup and a unified Notion property update.
 
@@ -8,7 +8,7 @@
 - Only touch pages whose `Github` field is empty or equals `WIP` (case-insensitive after trim), plus the existing valid-GitHub case for star refresh.
 - Any other non-empty value stays untouched, including non-GitHub URLs.
 - Fallback order is: abstract text → AlphaXiv resources page.
-- If a valid repository is discovered, update `Github` and `Github stars` together in one Notion update.
+- If a valid repository is discovered, update `Github` and `Stars` together in one Notion update.
 - If discovery fails, skip with a clear reason.
 
 ## Proposed Flow
@@ -25,8 +25,8 @@
 3. Extract owner/repo from the final URL candidate.
 4. Query GitHub API for stars.
 5. Update Notion:
-   - existing GitHub URL: update `Github stars` only
-   - discovered GitHub URL: update `Github` + `Github stars`
+   - existing GitHub URL: update `Stars` only
+   - discovered GitHub URL: update `Github` + `Stars`
 
 ## Data Sources Needed For Discovery
 

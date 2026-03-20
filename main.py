@@ -10,6 +10,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+GITHUB_PROPERTY_NAME = 'Github'
+GITHUB_STARS_PROPERTY_NAME = 'Stars'
+
+
 # 并发控制配置
 GITHUB_CONCURRENT_LIMIT = 5  # GitHub API 最大并发数
 NOTION_CONCURRENT_LIMIT = 3  # Notion API 最大并发数
@@ -72,7 +76,7 @@ def extract_owner_repo(github_url):
 
 def get_github_url_from_page(page):
     """从 page 中提取 Github 字段的值"""
-    github_property = page.get('properties', {}).get('Github', {})
+    github_property = page.get('properties', {}).get(GITHUB_PROPERTY_NAME, {})
 
     if github_property.get('type') == 'url':
         return github_property.get('url')
@@ -84,8 +88,8 @@ def get_github_url_from_page(page):
 
 
 def get_current_stars_from_page(page):
-    """从 page 中获取当前的 Github stars 字段值"""
-    stars_property = page.get('properties', {}).get('Github stars', {})
+    """从 page 中获取当前的 Stars 字段值"""
+    stars_property = page.get('properties', {}).get(GITHUB_STARS_PROPERTY_NAME, {})
 
     if stars_property.get('type') == 'number':
         return stars_property.get('number')
@@ -542,12 +546,12 @@ class NotionClient:
         self.semaphore = asyncio.Semaphore(max_concurrent)
 
     async def update_page_properties(self, page_id: str, *, github_url: str | None = None, stars_count: int | None = None):
-        """通用页面属性更新，按需更新 Github / Github stars，并在临时网络错误时有限重试"""
+        """通用页面属性更新，按需更新 Github / Stars，并在临时网络错误时有限重试"""
         properties = {}
         if github_url is not None:
-            properties['Github'] = {'url': github_url}
+            properties[GITHUB_PROPERTY_NAME] = {'url': github_url}
         if stars_count is not None:
-            properties['Github stars'] = {'number': stars_count}
+            properties[GITHUB_STARS_PROPERTY_NAME] = {'number': stars_count}
         if not properties:
             return
 
