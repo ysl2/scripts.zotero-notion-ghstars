@@ -68,7 +68,7 @@ The extraction helper should return the first normalized valid repository URL.
 ## Error Handling / Reporting
 
 Add or update reasons such as:
-- `Missing ALPHAXIV_API_KEY`
+- `Missing ALPHAXIV_TOKEN`
 - `No arXiv ID found for AlphaXiv API lookup`
 - `AlphaXiv API error (<status>)`
 - `No Github URL found in AlphaXiv API`
@@ -78,6 +78,6 @@ Rows skipped because the API has no GitHub should remain minor skips, not major 
 ## Security / Config
 
 Add a new environment variable:
-- `ALPHAXIV_API_KEY`
+- `ALPHAXIV_TOKEN`
 
 Do not print the key. README should document it as optional but required for AlphaXiv fallback discovery.

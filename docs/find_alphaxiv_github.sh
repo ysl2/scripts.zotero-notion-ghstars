@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # 用法:
-#   ALPHAXIV_API_KEY=xxxx ./find_alphaxiv_github.sh "论文标题"
+#   ALPHAXIV_TOKEN=xxxx ./find_alphaxiv_github.sh "论文标题"
 #
 # 例子:
-#   ALPHAXIV_API_KEY=xxxx ./find_alphaxiv_github.sh \
+#   ALPHAXIV_TOKEN=xxxx ./find_alphaxiv_github.sh \
 #     "MoRe: Motion-aware Feed-forward 4D Reconstruction Transformer"
 
 if ! command -v curl >/dev/null 2>&1; then
@@ -24,7 +24,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [ $# -lt 1 ]; then
-  echo "Usage: ALPHAXIV_API_KEY=... $0 \"paper title\"" >&2
+  echo "Usage: ALPHAXIV_TOKEN=... $0 \"paper title\"" >&2
   exit 1
 fi
 
@@ -102,9 +102,9 @@ PY
 echo "    arXiv ID = $ARXIV_ID"
 
 echo "[2/3] 查询 AlphaXiv 论文 JSON..."
-if [ -n "${ALPHAXIV_API_KEY:-}" ]; then
+if [ -n "${ALPHAXIV_TOKEN:-}" ]; then
   curl -fsSL \
-    -H "Authorization: Bearer ${ALPHAXIV_API_KEY}" \
+    -H "Authorization: Bearer ${ALPHAXIV_TOKEN}" \
     "${ALPHAXIV_API_BASE}/papers/v3/legacy/${ARXIV_ID}" \
     > "$ALPHAXIV_JSON"
 else

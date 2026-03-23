@@ -7,7 +7,7 @@ A Python script that automatically updates GitHub repository star counts in your
 ## Features
 
 - **Automatic Star Count Updates**: Fetches the latest star counts for GitHub repositories stored in Notion
-- **Fallback GitHub Discovery**: For rows whose `Github` field is empty or `WIP`, tries to discover the repo through the AlphaXiv legacy API using the arXiv URL in your Notion `URL` column
+- **Fallback GitHub Discovery**: For rows whose `Github` field is empty or `WIP`, tries Hugging Face Papers first when `HUGGINGFACE_TOKEN` is configured, then falls back to the AlphaXiv legacy API when `ALPHAXIV_TOKEN` is also configured
 - **Concurrent Processing**: Uses async/await for efficient parallel API requests
 - **Rate Limiting**: Built-in rate limiting to respect API quotas for both GitHub and Notion
 - **GitHub Token Support**: Optional GitHub authentication for higher rate limits (5000 vs 60 requests/hour)
@@ -53,7 +53,7 @@ Your Notion database must have these properties:
 - **Stars** (Number type): Star count (will be updated by the script)
 
 Optional but recommended properties for fallback discovery:
-- **URL** (preferred), or **Arxiv** / **arXiv** / **Paper URL** / **Link**: a field containing the arXiv URL, used for AlphaXiv legacy API fallback
+- **URL** (preferred), or **Arxiv** / **arXiv** / **Paper URL** / **Link**: a field containing the arXiv URL, used for Hugging Face / AlphaXiv fallback discovery
 
 ### 3. Set Environment Variables
 
@@ -69,9 +69,23 @@ DATABASE_ID=your_database_id_here
 # Optional: Your GitHub Personal Access Token (for higher rate limits)
 GITHUB_TOKEN=your_github_token_here
 
-# Optional but required if you want AlphaXiv fallback discovery for empty/WIP Github fields
-ALPHAXIV_API_KEY=your_alphaxiv_api_key_here
+# Optional: Enable Hugging Face Papers discovery for empty/WIP Github fields
+HUGGINGFACE_TOKEN=your_huggingface_token_here
+
+# Optional: Enable AlphaXiv fallback after Hugging Face misses
+ALPHAXIV_TOKEN=your_alphaxiv_token_here
 ```
+
+### 4. Fallback Discovery Policy
+
+When the `Github` field is empty or marked as `WIP`, the script enables fallback discovery based on which optional tokens are available.
+
+- If `HUGGINGFACE_TOKEN` is configured, Hugging Face Papers is always attempted first.
+- If `ALPHAXIV_TOKEN` is configured, AlphaXiv is available as an additional fallback source.
+- If both tokens are configured, the script tries Hugging Face first and only queries AlphaXiv when Hugging Face does not produce a usable GitHub repository URL.
+- If neither token is configured, fallback discovery is skipped entirely and the row is left unchanged.
+
+This means the discovery pipeline is driven by configuration rather than by hardcoded source assumptions: each source is used only when its corresponding token is present, while Hugging Face remains the preferred first lookup whenever it is enabled.
 
 To find your database ID:
 1. Open your database in Notion
@@ -98,12 +112,12 @@ uv run python main.py
 2. **Database Query**: Fetches pages from the data source
 3. **Concurrent Processing**: For each page:
    - If `Github` is a valid GitHub repo URL, fetches star count and updates `Stars`
-   - If `Github` is empty or `WIP`, the script first tries to extract an arXiv ID from the Notion `URL`-style field
-   - If the URL field is not an arXiv link, the script falls back to searching arXiv by the paper title to recover the best-matching arXiv ID
-   - Once an arXiv ID is available, it queries `https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}`
-   - The script looks for GitHub links in legacy fields like `paper.implementation`, `paper.marimo_implementation`, `paper.paper_group.resources`, `paper.resources`, then falls back to recursive scanning of the returned JSON
+   - If `Github` is empty or `WIP`, the script checks which fallback tokens are configured
+   - When `HUGGINGFACE_TOKEN` is present, the script first tries `https://huggingface.co/papers/{arxiv_id}` and then `https://huggingface.co/papers?q=<title>` to discover the paper page and extract its GitHub repo link
+   - If Hugging Face does not yield a GitHub repo and `ALPHAXIV_TOKEN` is present, the script falls back to `https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}`
+   - The AlphaXiv fallback looks for GitHub links in legacy fields like `paper.implementation`, `paper.marimo_implementation`, `paper.paper_group.resources`, `paper.resources`, then falls back to recursive scanning of the returned JSON
    - External HTTP requests use explicit timeouts and limited retries for transient failures like `429` / `502` / `503` / `504`
-   - If AlphaXiv API discovery succeeds, updates both `Github` and `Stars`
+   - If fallback discovery succeeds, updates both `Github` and `Stars`
    - If `Github` contains any other non-empty value, leaves the row unchanged
 4. **Results Summary**: Displays updated count and skipped items with reasons
 
@@ -186,7 +200,9 @@ Skipped items are categorized into two types:
 
 ### Minor (shown in gray)
 - Unsupported Github field content
-- Missing ALPHAXIV_API_KEY
+- No fallback discovery token configured
+- No Github URL found in Hugging Face Papers
+- Missing ALPHAXIV_TOKEN
 - No arXiv ID found for AlphaXiv API lookup
 - No Github URL found in AlphaXiv API
 - Discovered URL is not a valid GitHub repository

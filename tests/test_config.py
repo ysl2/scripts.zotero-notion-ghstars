@@ -42,13 +42,15 @@ class TestConfigLoading(unittest.TestCase):
             "NOTION_TOKEN": "notion_xxx",
             "GITHUB_TOKEN": "ghp_xxx",
             "DATABASE_ID": "db_123",
-            "ALPHAXIV_API_KEY": "axv1_test",
+            "ALPHAXIV_TOKEN": "axv1_test",
+            "HUGGINGFACE_TOKEN": "hf_test",
         }
         cfg = main.load_config_from_env(env)
         self.assertEqual(cfg["notion_token"], "notion_xxx")
         self.assertEqual(cfg["github_token"], "ghp_xxx")
         self.assertEqual(cfg["database_id"], "db_123")
-        self.assertEqual(cfg["alphaxiv_api_key"], "axv1_test")
+        self.assertEqual(cfg["alphaxiv_token"], "axv1_test")
+        self.assertEqual(cfg["huggingface_token"], "hf_test")
 
 
 class TestGithubFallbackHelpers(unittest.TestCase):
@@ -72,6 +74,7 @@ class TestGithubFallbackHelpers(unittest.TestCase):
         self.assertTrue(main.is_minor_skip_reason("Unsupported Github field content"))
         self.assertTrue(main.is_minor_skip_reason("AlphaXiv API error (500)"))
         self.assertTrue(main.is_minor_skip_reason("arXiv API error (429)"))
+        self.assertTrue(main.is_minor_skip_reason("Hugging Face Papers error (500)"))
 
     def test_extract_arxiv_id_from_url(self):
         self.assertEqual(main.extract_arxiv_id_from_url("https://arxiv.org/abs/2601.22135"), "2601.22135")
@@ -177,6 +180,17 @@ class TestGithubFallbackHelpers(unittest.TestCase):
         payload = {"resources": [{"url": "https://example.com/project"}], "title": "paper"}
         self.assertIsNone(main.find_github_url_in_json_payload(payload))
 
+    def test_find_github_url_in_huggingface_paper_html_prefers_github_repo_field(self):
+        html = '<script>window.__DATA__={"githubRepo":"https://github.com/foo/bar"}</script>'
+        self.assertEqual(
+            main.find_github_url_in_huggingface_paper_html(html),
+            "https://github.com/foo/bar",
+        )
+
+    def test_find_huggingface_paper_id_in_search_html(self):
+        html = '<a href="/papers/2603.05078">MoRe</a>'
+        self.assertEqual(main.find_huggingface_paper_id_in_search_html(html), "2603.05078")
+
     def test_find_github_url_in_alphaxiv_legacy_payload_prefers_known_fields(self):
         payload = {
             "paper": {
@@ -259,6 +273,175 @@ class TestNotionResilience(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["updated"], 0)
         self.assertEqual(len(results["skipped"]), 1)
         self.assertEqual(results["skipped"][0]["reason"], "Notion update failed: network down")
+
+
+class TestFallbackResolution(unittest.IsolatedAsyncioTestCase):
+    async def test_resolve_repo_prefers_huggingface_when_token_is_configured(self):
+        page = {
+            "properties": {
+                "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+                "Github": {"type": "rich_text", "rich_text": []},
+            }
+        }
+        github_client = types.SimpleNamespace(
+            huggingface_token="hf_test",
+            alphaxiv_token="axv1_test",
+        )
+        github_client.get_huggingface_paper_html_by_arxiv_id = AsyncMock(
+            return_value=('<a href="https://github.com/hf/repo">GitHub</a>', None)
+        )
+        github_client.get_huggingface_search_html = AsyncMock()
+        github_client.get_alphaxiv_paper_legacy = AsyncMock()
+
+        with unittest.mock.patch.object(
+            main,
+            "resolve_arxiv_id_for_page",
+            AsyncMock(return_value=("2603.05078", "url_field", None)),
+        ):
+            resolution = await main.resolve_repo_for_page(page, github_client)
+
+        self.assertEqual(resolution["source"], "huggingface")
+        self.assertEqual(resolution["github_url"], "https://github.com/hf/repo")
+        github_client.get_alphaxiv_paper_legacy.assert_not_called()
+
+    async def test_resolve_repo_falls_back_to_alphaxiv_when_huggingface_misses(self):
+        page = {
+            "properties": {
+                "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+                "Github": {"type": "rich_text", "rich_text": []},
+            }
+        }
+        github_client = types.SimpleNamespace(
+            huggingface_token="hf_test",
+            alphaxiv_token="axv1_test",
+        )
+        github_client.get_huggingface_paper_html_by_arxiv_id = AsyncMock(return_value=("<html></html>", None))
+        github_client.get_huggingface_search_html = AsyncMock(return_value=("<html></html>", None))
+        github_client.get_alphaxiv_paper_legacy = AsyncMock(
+            return_value=({"paper": {"implementation": "https://github.com/ax/repo"}}, None)
+        )
+
+        with unittest.mock.patch.object(
+            main,
+            "resolve_arxiv_id_for_page",
+            AsyncMock(return_value=("2603.05078", "url_field", None)),
+        ):
+            resolution = await main.resolve_repo_for_page(page, github_client)
+
+        self.assertEqual(resolution["source"], "alphaxiv_api")
+        self.assertEqual(resolution["github_url"], "https://github.com/ax/repo")
+        github_client.get_alphaxiv_paper_legacy.assert_awaited_once()
+
+    async def test_resolve_repo_retries_huggingface_via_title_search_after_direct_page_error(self):
+        page = {
+            "properties": {
+                "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+                "Github": {"type": "rich_text", "rich_text": []},
+            }
+        }
+        github_client = types.SimpleNamespace(
+            huggingface_token="hf_test",
+            alphaxiv_token="axv1_test",
+        )
+        github_client.get_huggingface_paper_html_by_arxiv_id = AsyncMock(
+            side_effect=[
+                (None, "Hugging Face Papers error (404)"),
+                ('<a href="https://github.com/hf/repo">GitHub</a>', None),
+            ]
+        )
+        github_client.get_huggingface_search_html = AsyncMock(
+            return_value=('<a href="/papers/2603.05079">Test Paper</a>', None)
+        )
+        github_client.get_alphaxiv_paper_legacy = AsyncMock()
+
+        with unittest.mock.patch.object(
+            main,
+            "resolve_arxiv_id_for_page",
+            AsyncMock(return_value=("2603.05078", "url_field", None)),
+        ):
+            resolution = await main.resolve_repo_for_page(page, github_client)
+
+        self.assertEqual(resolution["source"], "huggingface")
+        self.assertEqual(resolution["arxiv_source"], "hf_search")
+        self.assertEqual(resolution["github_url"], "https://github.com/hf/repo")
+        github_client.get_huggingface_search_html.assert_awaited_once()
+        github_client.get_alphaxiv_paper_legacy.assert_not_called()
+
+    async def test_resolve_repo_does_not_fall_back_to_alphaxiv_without_token(self):
+        page = {
+            "properties": {
+                "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+                "Github": {"type": "rich_text", "rich_text": []},
+            }
+        }
+        github_client = types.SimpleNamespace(
+            huggingface_token="hf_test",
+            alphaxiv_token="",
+        )
+        github_client.get_huggingface_paper_html_by_arxiv_id = AsyncMock(return_value=("<html></html>", None))
+        github_client.get_huggingface_search_html = AsyncMock(return_value=("<html></html>", None))
+        github_client.get_alphaxiv_paper_legacy = AsyncMock()
+
+        with unittest.mock.patch.object(
+            main,
+            "resolve_arxiv_id_for_page",
+            AsyncMock(return_value=("2603.05078", "url_field", None)),
+        ):
+            resolution = await main.resolve_repo_for_page(page, github_client)
+
+        self.assertEqual(resolution["github_url"], None)
+        self.assertEqual(resolution["reason"], "No Github URL found in Hugging Face Papers")
+        github_client.get_alphaxiv_paper_legacy.assert_not_called()
+
+    async def test_resolve_repo_uses_alphaxiv_when_only_alphaxiv_is_configured(self):
+        page = {
+            "properties": {
+                "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+                "Github": {"type": "rich_text", "rich_text": []},
+            }
+        }
+        github_client = types.SimpleNamespace(
+            huggingface_token="",
+            alphaxiv_token="axv1_test",
+        )
+        github_client.get_huggingface_paper_html_by_arxiv_id = AsyncMock()
+        github_client.get_huggingface_search_html = AsyncMock()
+        github_client.get_alphaxiv_paper_legacy = AsyncMock(
+            return_value=({"paper": {"implementation": "https://github.com/ax/repo"}}, None)
+        )
+
+        with unittest.mock.patch.object(
+            main,
+            "resolve_arxiv_id_for_page",
+            AsyncMock(return_value=("2603.05078", "url_field", None)),
+        ):
+            resolution = await main.resolve_repo_for_page(page, github_client)
+
+        self.assertEqual(resolution["source"], "alphaxiv_api")
+        self.assertEqual(resolution["github_url"], "https://github.com/ax/repo")
+        github_client.get_huggingface_paper_html_by_arxiv_id.assert_not_called()
+
+    async def test_resolve_repo_skips_fallback_when_no_tokens_are_configured(self):
+        page = {
+            "properties": {
+                "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+                "Github": {"type": "rich_text", "rich_text": []},
+            }
+        }
+        github_client = types.SimpleNamespace(
+            huggingface_token="",
+            alphaxiv_token="",
+        )
+        github_client.get_huggingface_paper_html_by_arxiv_id = AsyncMock()
+        github_client.get_huggingface_search_html = AsyncMock()
+        github_client.get_alphaxiv_paper_legacy = AsyncMock()
+
+        resolution = await main.resolve_repo_for_page(page, github_client)
+
+        self.assertEqual(resolution["github_url"], None)
+        self.assertEqual(resolution["reason"], "No fallback discovery token configured")
+        github_client.get_huggingface_paper_html_by_arxiv_id.assert_not_called()
+        github_client.get_alphaxiv_paper_legacy.assert_not_called()
 
 
 if __name__ == "__main__":

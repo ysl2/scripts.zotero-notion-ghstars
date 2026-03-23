@@ -4,7 +4,7 @@
 
 **Goal:** Replace abstract/HTML fallback discovery with AlphaXiv API-only discovery for rows whose `Github` field is empty or `WIP`.
 
-**Architecture:** Preserve the unified page pipeline, but narrow the fallback resolver to one external source: AlphaXiv API. Add config for `ALPHAXIV_API_KEY`, use one primary API endpoint per arXiv id, recursively search the JSON payload for GitHub repository URLs, and then reuse the existing GitHub star update and Notion update logic.
+**Architecture:** Preserve the unified page pipeline, but narrow the fallback resolver to one external source: AlphaXiv API. Add config for `ALPHAXIV_TOKEN`, use one primary API endpoint per arXiv id, recursively search the JSON payload for GitHub repository URLs, and then reuse the existing GitHub star update and Notion update logic.
 
 **Tech Stack:** Python 3.12, aiohttp, notion-client, python-dotenv, unittest
 
@@ -19,7 +19,7 @@
 **Step 1: Write the failing tests**
 
 Add tests for:
-- `load_config_from_env` returns `alphaxiv_api_key`
+- `load_config_from_env` returns `alphaxiv_token`
 - recursive JSON GitHub extraction finds URLs inside nested dict/list payloads
 - recursive JSON GitHub extraction returns `None` when no GitHub URL exists
 
@@ -44,7 +44,7 @@ git -C /Users/songliyu/Documents/scripts.zotero-notion-ghstars commit -m "test: 
 **Step 1: Write minimal implementation**
 
 Add:
-- `alphaxiv_api_key` to config loading
+- `alphaxiv_token` to config loading
 - helper to recursively scan JSON-like payloads for GitHub repo URLs
 - helper to build AlphaXiv API headers
 
@@ -104,7 +104,7 @@ git -C /Users/songliyu/Documents/scripts.zotero-notion-ghstars commit -m "feat: 
 
 Document:
 - fallback is now AlphaXiv API only
-- `ALPHAXIV_API_KEY` environment variable
+- `ALPHAXIV_TOKEN` environment variable
 - abstract scanning and HTML scraping are no longer used
 
 **Step 2: Verify**

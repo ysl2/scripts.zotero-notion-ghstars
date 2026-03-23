@@ -197,6 +197,37 @@ def find_github_url_in_alphaxiv_legacy_payload(payload):
     return find_github_url_in_json_payload(payload)
 
 
+def find_github_url_in_huggingface_paper_html(html: str):
+    """从 Hugging Face paper page HTML 中提取 GitHub 仓库链接"""
+    if not html or not isinstance(html, str):
+        return None
+
+    patterns = (
+        r'"githubRepo"\s*:\s*"(https://github\.com/[^"]+)"',
+        r'href="(https://github\.com/[^"]+)"[^>]*>\s*GitHub\s*<',
+        r'GitHub\s*</[^>]+>\s*<[^>]+href="(https://github\.com/[^"]+)"',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if match:
+            github_url = normalize_github_url(match.group(1).replace('\\/', '/'))
+            if github_url:
+                return github_url
+
+    return find_github_url_in_text(html)
+
+
+def find_huggingface_paper_id_in_search_html(html: str):
+    """从 Hugging Face 搜索结果 HTML 中提取第一个论文 arXiv ID"""
+    if not html or not isinstance(html, str):
+        return None
+
+    match = re.search(r'/papers/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?', html)
+    if match:
+        return match.group(1)
+    return None
+
+
 ABSTRACT_PROPERTY_CANDIDATES = ('Abstract', 'Summary', 'TL;DR', 'Notes')
 ARXIV_PROPERTY_CANDIDATES = ('URL', 'Arxiv', 'arXiv', 'Paper URL', 'Link')
 
@@ -310,7 +341,8 @@ def load_config_from_env(env: dict[str, str]) -> dict[str, str]:
     """从环境变量读取配置并校验必填项"""
     notion_token = (env.get('NOTION_TOKEN') or '').strip()
     github_token = (env.get('GITHUB_TOKEN') or '').strip()
-    alphaxiv_api_key = (env.get('ALPHAXIV_API_KEY') or '').strip()
+    alphaxiv_token = (env.get('ALPHAXIV_TOKEN') or '').strip()
+    huggingface_token = (env.get('HUGGINGFACE_TOKEN') or '').strip()
     database_id = (env.get('DATABASE_ID') or '').strip()
 
     missing = []
@@ -326,7 +358,8 @@ def load_config_from_env(env: dict[str, str]) -> dict[str, str]:
     return {
         'notion_token': notion_token,
         'github_token': github_token,
-        'alphaxiv_api_key': alphaxiv_api_key,
+        'alphaxiv_token': alphaxiv_token,
+        'huggingface_token': huggingface_token,
         'database_id': database_id,
     }
 
@@ -339,11 +372,19 @@ def get_github_headers(github_token: str):
     return headers
 
 
-def get_alphaxiv_headers(alphaxiv_api_key: str):
+def get_alphaxiv_headers(alphaxiv_token: str):
     """获取 AlphaXiv API 请求头"""
     headers = {'Accept': 'application/json', 'User-Agent': 'notion-github-stars-updater'}
-    if alphaxiv_api_key:
-        headers['Authorization'] = f'Bearer {alphaxiv_api_key}'
+    if alphaxiv_token:
+        headers['Authorization'] = f'Bearer {alphaxiv_token}'
+    return headers
+
+
+def get_huggingface_headers(huggingface_token: str):
+    """获取 Hugging Face 请求头"""
+    headers = {'Accept': 'text/html,application/json', 'User-Agent': 'notion-github-stars-updater'}
+    if huggingface_token:
+        headers['Authorization'] = f'Bearer {huggingface_token}'
     return headers
 
 
@@ -353,12 +394,17 @@ MINOR_SKIP_REASONS = {
     'No Github URL found',
     'Cannot extract owner/repo',
     'Unsupported Github field content',
-    'Missing ALPHAXIV_API_KEY',
+    'No fallback discovery token configured',
+    'Missing ALPHAXIV_TOKEN',
     'No arXiv ID found for AlphaXiv API lookup',
+    'No Github URL found in Hugging Face Papers',
     'No Github URL found in AlphaXiv API',
     'Discovered URL is not a valid GitHub repository',
 }
 MINOR_SKIP_REASON_PREFIXES = (
+    'Hugging Face Papers error',
+    'Hugging Face Papers timeout',
+    'Hugging Face Papers request failed:',
     'AlphaXiv API error',
     'AlphaXiv API timeout',
     'AlphaXiv API request failed:',
@@ -393,11 +439,19 @@ class RateLimiter:
 class GitHubClient:
     """外部 HTTP 异步客户端，复用 GitHub 速率限制设置"""
 
-    def __init__(self, max_concurrent: int, min_interval: float, github_token: str, alphaxiv_api_key: str = ''):
+    def __init__(
+        self,
+        max_concurrent: int,
+        min_interval: float,
+        github_token: str,
+        alphaxiv_token: str = '',
+        huggingface_token: str = '',
+    ):
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.rate_limiter = RateLimiter(min_interval)
         self.github_token = github_token
-        self.alphaxiv_api_key = alphaxiv_api_key
+        self.alphaxiv_token = alphaxiv_token
+        self.huggingface_token = huggingface_token
         self.session = None
         self.rate_limit_remaining = None
         self.rate_limit_reset = None
@@ -448,13 +502,44 @@ class GitHubClient:
             retry_prefix='arXiv API',
         )
 
+    async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id: str):
+        """通过 arXiv ID 获取 Hugging Face paper page HTML"""
+        if not self.huggingface_token:
+            return None, 'Missing HUGGINGFACE_TOKEN'
+
+        url = f'https://huggingface.co/papers/{arxiv_id}'
+        headers = get_huggingface_headers(self.huggingface_token)
+        return await self.request_with_retry(
+            'GET',
+            url,
+            headers=headers,
+            expect='text',
+            retry_prefix='Hugging Face Papers',
+        )
+
+    async def get_huggingface_search_html(self, title: str):
+        """通过标题获取 Hugging Face papers 搜索结果 HTML"""
+        if not self.huggingface_token:
+            return None, 'Missing HUGGINGFACE_TOKEN'
+
+        url = 'https://huggingface.co/papers'
+        headers = get_huggingface_headers(self.huggingface_token)
+        return await self.request_with_retry(
+            'GET',
+            url,
+            headers=headers,
+            params={'q': title},
+            expect='text',
+            retry_prefix='Hugging Face Papers',
+        )
+
     async def get_alphaxiv_paper_legacy(self, arxiv_id: str):
         """通过 AlphaXiv legacy API 获取论文 JSON 数据"""
-        if not self.alphaxiv_api_key:
-            return None, 'Missing ALPHAXIV_API_KEY'
+        if not self.alphaxiv_token:
+            return None, 'Missing ALPHAXIV_TOKEN'
 
         url = f'https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}'
-        headers = get_alphaxiv_headers(self.alphaxiv_api_key)
+        headers = get_alphaxiv_headers(self.alphaxiv_token)
         return await self.request_with_retry(
             'GET',
             url,
@@ -630,6 +715,15 @@ def format_resolution_source_label(source: str | None, arxiv_source: str | None 
     """格式化日志中的来源标签"""
     if source == 'existing':
         return 'existing Github'
+    if source == 'huggingface':
+        mapping = {
+            'url_field': 'Hugging Face fallback (from URL field)',
+            'title_search_exact': 'Hugging Face fallback (from title search: exact match)',
+            'title_search_contained': 'Hugging Face fallback (from title search: contained match)',
+            'title_search_contains_entry': 'Hugging Face fallback (from title search: reverse contained match)',
+            'hf_search': 'Hugging Face fallback (from Hugging Face title search)',
+        }
+        return mapping.get(arxiv_source, 'Hugging Face fallback')
     if source == 'alphaxiv_api':
         mapping = {
             'url_field': 'AlphaXiv API fallback (from URL field)',
@@ -639,6 +733,42 @@ def format_resolution_source_label(source: str | None, arxiv_source: str | None 
         }
         return mapping.get(arxiv_source, 'AlphaXiv API fallback')
     return 'unknown source'
+
+
+async def discover_github_url_from_huggingface(page: dict, github_client: GitHubClient):
+    """从 Hugging Face paper pages 中发现 GitHub 仓库链接"""
+    arxiv_id, arxiv_source, error = await resolve_arxiv_id_for_page(page, github_client)
+    direct_page_error = None
+    if arxiv_id:
+        html, page_error = await github_client.get_huggingface_paper_html_by_arxiv_id(arxiv_id)
+        if page_error:
+            direct_page_error = page_error
+        else:
+            github_url = find_github_url_in_huggingface_paper_html(html)
+            if github_url:
+                return github_url, arxiv_source, None
+
+    title = get_page_title(page)
+    if title:
+        search_html, search_error = await github_client.get_huggingface_search_html(title)
+        if search_error:
+            return None, arxiv_source, search_error
+
+        paper_id = find_huggingface_paper_id_in_search_html(search_html)
+        if paper_id:
+            html, page_error = await github_client.get_huggingface_paper_html_by_arxiv_id(paper_id)
+            if page_error:
+                return None, 'hf_search', page_error
+
+            github_url = find_github_url_in_huggingface_paper_html(html)
+            if github_url:
+                return github_url, 'hf_search', None
+
+    if direct_page_error:
+        return None, arxiv_source, direct_page_error
+    if error and not title:
+        return None, arxiv_source, error
+    return None, arxiv_source, 'No Github URL found in Hugging Face Papers'
 
 
 async def discover_github_url_from_alphaxiv_api(page: dict, github_client: GitHubClient):
@@ -678,22 +808,49 @@ async def resolve_repo_for_page(page: dict, github_client: GitHubClient):
             'reason': 'Unsupported Github field content',
         }
 
-    github_url, arxiv_source, error = await discover_github_url_from_alphaxiv_api(page, github_client)
-    if github_url:
+    if github_client.huggingface_token:
+        github_url, arxiv_source, error = await discover_github_url_from_huggingface(page, github_client)
+        if github_url:
+            return {
+                'github_url': github_url,
+                'source': 'huggingface',
+                'arxiv_source': arxiv_source,
+                'needs_github_update': True,
+                'reason': None,
+            }
+        if not github_client.alphaxiv_token:
+            return {
+                'github_url': None,
+                'source': None,
+                'arxiv_source': arxiv_source,
+                'needs_github_update': False,
+                'reason': error or 'No Github URL found in Hugging Face Papers',
+            }
+
+    if github_client.alphaxiv_token:
+        github_url, arxiv_source, error = await discover_github_url_from_alphaxiv_api(page, github_client)
+        if github_url:
+            return {
+                'github_url': github_url,
+                'source': 'alphaxiv_api',
+                'arxiv_source': arxiv_source,
+                'needs_github_update': True,
+                'reason': None,
+            }
         return {
-            'github_url': github_url,
-            'source': 'alphaxiv_api',
+            'github_url': None,
+            'source': None,
             'arxiv_source': arxiv_source,
-            'needs_github_update': True,
-            'reason': None,
+            'needs_github_update': False,
+            'reason': error or 'No Github URL found in AlphaXiv API',
         }
 
     return {
         'github_url': None,
         'source': None,
-        'arxiv_source': arxiv_source,
+        'arxiv_source': None,
         'needs_github_update': False,
-        'reason': error or 'No Github URL found',
+        'reason': 'No fallback discovery token configured',
     }
 
 
@@ -805,7 +962,13 @@ async def main():
     print(f'⚙️ Request interval: {REQUEST_DELAY}s')
     print()
 
-    async with GitHubClient(GITHUB_CONCURRENT_LIMIT, REQUEST_DELAY, github_token, config['alphaxiv_api_key']) as github_client:
+    async with GitHubClient(
+        GITHUB_CONCURRENT_LIMIT,
+        REQUEST_DELAY,
+        github_token,
+        config['alphaxiv_token'],
+        config['huggingface_token'],
+    ) as github_client:
         async with NotionClient(notion_token, NOTION_CONCURRENT_LIMIT) as notion_client:
             # 检查 rate limit
             rate_info = await github_client.check_rate_limit()
