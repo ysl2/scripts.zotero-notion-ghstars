@@ -1,4 +1,5 @@
 import asyncio
+import html as html_lib
 import re
 
 import aiohttp
@@ -44,19 +45,27 @@ def find_github_url_in_huggingface_paper_html(html: str) -> str | None:
     if not html or not isinstance(html, str):
         return None
 
+    candidates = [html]
+    decoded_html = html_lib.unescape(html)
+    if decoded_html != html:
+        candidates.insert(0, decoded_html)
+
     patterns = (
         r'"githubRepo"\s*:\s*"(https://github\.com/[^"]+)"',
+        r'<a[^>]*href="(https://github\.com/[^"]+)"[^>]*\b(?:aria-label|title)="GitHub"[^>]*>',
+        r'<a[^>]*\b(?:aria-label|title)="GitHub"[^>]*href="(https://github\.com/[^"]+)"[^>]*>',
         r'href="(https://github\.com/[^"]+)"[^>]*>\s*GitHub\s*<',
         r'GitHub\s*</[^>]+>\s*<[^>]+href="(https://github\.com/[^"]+)"',
     )
-    for pattern in patterns:
-        match = re.search(pattern, html, flags=re.IGNORECASE)
-        if match:
-            github_url = normalize_github_url(match.group(1).replace("\\/", "/"))
-            if github_url:
-                return github_url
+    for candidate in candidates:
+        for pattern in patterns:
+            match = re.search(pattern, candidate, flags=re.IGNORECASE)
+            if match:
+                github_url = normalize_github_url(match.group(1).replace("\\/", "/"))
+                if github_url:
+                    return github_url
 
-    return find_github_url_in_text(html)
+    return None
 
 
 def find_huggingface_paper_id_in_search_html(html: str) -> str | None:

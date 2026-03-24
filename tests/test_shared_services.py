@@ -29,6 +29,21 @@ def test_find_github_url_in_huggingface_paper_html_prefers_embedded_repo_field()
     assert find_github_url_in_huggingface_paper_html(html) == "https://github.com/foo/bar"
 
 
+def test_find_github_url_in_huggingface_paper_html_reads_html_escaped_repo_field_before_discussion_links():
+    html = (
+        "Discussion mentions https://github.com/naver/dust3r/pull/16 first. "
+        "&quot;githubRepo&quot;:&quot;https://github.com/facebookresearch/fast3r&quot;"
+    )
+
+    assert find_github_url_in_huggingface_paper_html(html) == "https://github.com/facebookresearch/fast3r"
+
+
+def test_find_github_url_in_huggingface_paper_html_ignores_arbitrary_discussion_links_without_explicit_repo_field():
+    html = "Discussion mentions https://github.com/naver/dust3r/pull/16 but no explicit repo metadata."
+
+    assert find_github_url_in_huggingface_paper_html(html) is None
+
+
 def test_find_github_url_in_alphaxiv_legacy_payload_prefers_known_fields():
     payload = {
         "paper": {
