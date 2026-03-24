@@ -11,9 +11,11 @@ async def test_async_main_runs_notion_mode_when_no_args(monkeypatch):
     notion_runner = AsyncMock(return_value=0)
     html_runner = AsyncMock(return_value=0)
     csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
     monkeypatch.setattr(main, "run_notion_mode", notion_runner)
     monkeypatch.setattr(main, "run_html_mode", html_runner)
-    monkeypatch.setattr(main, "run_csv_mode", csv_runner, raising=False)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
 
     exit_code = await main.async_main([])
 
@@ -21,6 +23,7 @@ async def test_async_main_runs_notion_mode_when_no_args(monkeypatch):
     notion_runner.assert_awaited_once_with()
     html_runner.assert_not_awaited()
     csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -31,9 +34,11 @@ async def test_async_main_runs_html_mode_when_given_existing_html_path(tmp_path:
     notion_runner = AsyncMock(return_value=0)
     html_runner = AsyncMock(return_value=0)
     csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
     monkeypatch.setattr(main, "run_notion_mode", notion_runner)
     monkeypatch.setattr(main, "run_html_mode", html_runner)
-    monkeypatch.setattr(main, "run_csv_mode", csv_runner, raising=False)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
 
     exit_code = await main.async_main([str(html_path)])
 
@@ -41,6 +46,7 @@ async def test_async_main_runs_html_mode_when_given_existing_html_path(tmp_path:
     notion_runner.assert_not_awaited()
     html_runner.assert_awaited_once_with(html_path)
     csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -51,9 +57,11 @@ async def test_async_main_runs_csv_mode_when_given_existing_csv_path(tmp_path: P
     notion_runner = AsyncMock(return_value=0)
     html_runner = AsyncMock(return_value=0)
     csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
     monkeypatch.setattr(main, "run_notion_mode", notion_runner)
     monkeypatch.setattr(main, "run_html_mode", html_runner)
-    monkeypatch.setattr(main, "run_csv_mode", csv_runner, raising=False)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
 
     exit_code = await main.async_main([str(csv_path)])
 
@@ -61,6 +69,29 @@ async def test_async_main_runs_csv_mode_when_given_existing_csv_path(tmp_path: P
     notion_runner.assert_not_awaited()
     html_runner.assert_not_awaited()
     csv_runner.assert_awaited_once_with(csv_path)
+    url_runner.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_async_main_runs_url_mode_when_given_supported_arxivxplorer_url(monkeypatch):
+    input_url = "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026"
+
+    notion_runner = AsyncMock(return_value=0)
+    html_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(main, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(main, "run_html_mode", html_runner)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
+
+    exit_code = await main.async_main([input_url])
+
+    assert exit_code == 0
+    notion_runner.assert_not_awaited()
+    html_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_awaited_once_with(input_url)
 
 
 @pytest.mark.anyio
@@ -70,9 +101,11 @@ async def test_async_main_returns_error_when_given_missing_html_path(tmp_path: P
     notion_runner = AsyncMock(return_value=0)
     html_runner = AsyncMock(return_value=0)
     csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
     monkeypatch.setattr(main, "run_notion_mode", notion_runner)
     monkeypatch.setattr(main, "run_html_mode", html_runner)
-    monkeypatch.setattr(main, "run_csv_mode", csv_runner, raising=False)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
 
     exit_code = await main.async_main([str(html_path)])
 
@@ -82,6 +115,7 @@ async def test_async_main_returns_error_when_given_missing_html_path(tmp_path: P
     notion_runner.assert_not_awaited()
     html_runner.assert_not_awaited()
     csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -91,9 +125,11 @@ async def test_async_main_returns_error_when_given_missing_csv_path(tmp_path: Pa
     notion_runner = AsyncMock(return_value=0)
     html_runner = AsyncMock(return_value=0)
     csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
     monkeypatch.setattr(main, "run_notion_mode", notion_runner)
     monkeypatch.setattr(main, "run_html_mode", html_runner)
-    monkeypatch.setattr(main, "run_csv_mode", csv_runner, raising=False)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
 
     exit_code = await main.async_main([str(csv_path)])
 
@@ -103,6 +139,29 @@ async def test_async_main_returns_error_when_given_missing_csv_path(tmp_path: Pa
     notion_runner.assert_not_awaited()
     html_runner.assert_not_awaited()
     csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_async_main_returns_error_for_unsupported_url(capsys, monkeypatch):
+    notion_runner = AsyncMock(return_value=0)
+    html_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(main, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(main, "run_html_mode", html_runner)
+    monkeypatch.setattr(main, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(main, "run_url_mode", url_runner, raising=False)
+
+    exit_code = await main.async_main(["https://example.com/search?q=test"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Input file or URL not supported" in captured.err
+    notion_runner.assert_not_awaited()
+    html_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
 
 
 @pytest.mark.anyio

@@ -1,12 +1,15 @@
 import asyncio
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 from csv_update.runner import run_csv_mode
 from html_to_csv.runner import run_html_mode
 from notion_sync.runner import run_notion_mode
+from url_to_csv.runner import run_url_mode
+from url_to_csv.arxivxplorer import is_supported_arxivxplorer_url
 
 
 load_dotenv()
@@ -25,6 +28,11 @@ def _validate_input_path(raw_path: str) -> Path | None:
     return path
 
 
+def _is_url(raw_value: str) -> bool:
+    parsed = urlparse(raw_value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
 async def async_main(argv: list[str] | None = None) -> int:
     args = _normalize_argv(argv)
 
@@ -35,9 +43,16 @@ async def async_main(argv: list[str] | None = None) -> int:
     if not args:
         return await run_notion_mode()
 
-    input_path = _validate_input_path(args[0])
+    raw_input = args[0]
+    if _is_url(raw_input):
+        if not is_supported_arxivxplorer_url(raw_input):
+            print(f"Input file or URL not supported: {raw_input}", file=sys.stderr)
+            return 1
+        return await run_url_mode(raw_input)
+
+    input_path = _validate_input_path(raw_input)
     if input_path is None:
-        print(f"Input file not found or invalid: {Path(args[0]).expanduser()}", file=sys.stderr)
+        print(f"Input file not found or invalid: {Path(raw_input).expanduser()}", file=sys.stderr)
         return 1
 
     if input_path.suffix.lower() == ".html":

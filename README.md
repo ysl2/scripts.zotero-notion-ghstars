@@ -1,9 +1,11 @@
-# Zotero Notion And HTML GitHub Stars
+# Zotero Notion, HTML, CSV, And URL GitHub Stars
 
-One CLI, two modes:
+One CLI, four modes:
 
 - No positional argument: sync GitHub links and star counts into Notion
 - One existing `.html` file path: convert paper cards in that HTML file into a same-name CSV
+- One existing `.csv` file path: update that CSV in place
+- One supported `https://arxivxplorer.com/?...` URL: fetch the full search result set and write a CSV in the current working directory
 
 The HTML mode keeps the existing repository discovery policy:
 
@@ -78,6 +80,41 @@ HTML mode behavior:
 - progress is printed incrementally in the terminal during processing
 - writes use a temp file and atomic replace
 
+### CSV update mode
+
+Reads one CSV file, keeps unrelated columns untouched, and updates `Github` / `Stars` in place.
+
+```bash
+uv run main.py /path/to/papers.csv
+```
+
+CSV mode behavior:
+
+- uses canonical arXiv `Url` as the paper identity
+- if `Github` is already present and valid, only `Stars` is refreshed
+- if `Github` is blank, repository discovery still uses Hugging Face first and AlphaXiv second
+- missing `Github` or `Stars` columns are appended automatically
+- writes use a temp file and atomic replace
+
+### Arxivxplorer URL to CSV mode
+
+Reads a supported `arxivxplorer.com` search URL, fetches all paginated results from the backing search API, and writes a CSV in the current working directory.
+
+```bash
+uv run main.py 'https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026&year=2025&year=2024'
+```
+
+Output example:
+
+- `./arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv`
+
+URL mode behavior:
+
+- uses the site’s paging API instead of trying to click `Show More` in a browser
+- keeps fetching pages until the API returns an empty page, so it is not limited by the frontend button behavior
+- only arXiv search results are converted into papers for downstream Github/Stars enrichment
+- downstream repository discovery, star lookup, sorting, progress printing, and CSV writing reuse the same logic as HTML mode
+
 ## HTML expectations
 
 The HTML parser currently targets card-style markup like:
@@ -113,8 +150,9 @@ When `Github` is empty or `WIP`, the sync flow tries to discover the repo from t
 ## Notes
 
 - Invalid file path does not fall back to Notion mode
+- Unsupported URLs fail instead of falling back to another mode
 - More than one positional argument is treated as a usage error
-- Concurrency and rate limiting remain enabled in both modes
+- Concurrency and rate limiting remain enabled in all modes
 - `*.html` and `*.csv` are gitignored globally; use `git add -f` only if you intentionally want to track one
 
 ## Tests

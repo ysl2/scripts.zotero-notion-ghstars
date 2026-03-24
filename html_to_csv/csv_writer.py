@@ -12,8 +12,7 @@ def output_csv_path_for_html(html_path: Path) -> Path:
     return html_path.with_suffix(".csv")
 
 
-def write_records_to_csv(records: list[PaperRecord], html_path: Path) -> Path:
-    csv_path = output_csv_path_for_html(html_path)
+def write_records_to_csv_path(records: list[PaperRecord], csv_path: Path) -> Path:
     sorted_records = sort_records(records)
 
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="", delete=False, dir=csv_path.parent) as handle:
@@ -32,3 +31,7 @@ def write_records_to_csv(records: list[PaperRecord], html_path: Path) -> Path:
 
     temp_path.replace(csv_path)
     return csv_path
+
+
+def write_records_to_csv(records: list[PaperRecord], html_path: Path) -> Path:
+    return write_records_to_csv_path(records, output_csv_path_for_html(html_path))

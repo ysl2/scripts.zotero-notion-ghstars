@@ -1,0 +1,207 @@
+import csv
+from pathlib import Path
+
+import pytest
+
+from url_to_csv.arxivxplorer import TooManyPagesError, output_csv_path_for_arxivxplorer_url, parse_arxivxplorer_url
+from url_to_csv.pipeline import fetch_paper_seeds_from_url, export_url_to_csv
+from url_to_csv.runner import run_url_mode
+
+
+def test_parse_arxivxplorer_url_reads_query_categories_and_years():
+    query = parse_arxivxplorer_url(
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&cats=cs.LG&year=2026&year=2025"
+    )
+
+    assert query.search_text == "streaming semantic 3d reconstruction"
+    assert query.categories == ("cs.CV", "cs.LG")
+    assert query.years == ("2026", "2025")
+
+
+def test_output_csv_path_for_arxivxplorer_url_uses_current_working_directory(tmp_path: Path):
+    csv_path = output_csv_path_for_arxivxplorer_url(
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026&year=2025&year=2024",
+        output_dir=tmp_path,
+    )
+
+    assert csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv"
+
+
+@pytest.mark.anyio
+async def test_fetch_paper_seeds_from_url_pages_until_empty_and_deduplicates_arxiv_urls():
+    class FakeSearchClient:
+        def __init__(self):
+            self.pages = []
+
+        async def search(self, query, page: int):
+            self.pages.append(page)
+            data = {
+                1: [
+                    {"id": "2501.00001", "journal": "arxiv", "title": "Paper A"},
+                    {"id": "10.1101/123", "journal": "biorxiv", "title": "Ignore Me"},
+                ],
+                2: [
+                    {"id": "2501.00001", "journal": "arxiv", "title": "Duplicate Paper A"},
+                    {"id": "2501.00002", "journal": "arxiv", "title": "Paper B"},
+                ],
+                3: [],
+            }
+            return data[page]
+
+    search_client = FakeSearchClient()
+    messages = []
+    result = await fetch_paper_seeds_from_url(
+        "https://arxivxplorer.com/?q=test&cats=cs.CV&year=2026",
+        search_client=search_client,
+        status_callback=messages.append,
+    )
+
+    assert [seed.name for seed in result.seeds] == ["Paper A", "Paper B"]
+    assert [seed.url for seed in result.seeds] == [
+        "https://arxiv.org/abs/2501.00001",
+        "https://arxiv.org/abs/2501.00002",
+    ]
+    assert search_client.pages == [1, 2, 3]
+    assert any("Fetching arXiv Xplorer page 1" in message for message in messages)
+    assert any("Fetched page 2" in message for message in messages)
+
+
+@pytest.mark.anyio
+async def test_fetch_paper_seeds_from_url_stops_on_too_many_pages_boundary():
+    class FakeSearchClient:
+        def __init__(self):
+            self.pages = []
+
+        async def search(self, query, page: int):
+            self.pages.append(page)
+            if page == 1:
+                return [{"id": "2501.00001", "journal": "arxiv", "title": "Paper A"}]
+            raise TooManyPagesError("Too many pages.")
+
+    search_client = FakeSearchClient()
+    messages = []
+    result = await fetch_paper_seeds_from_url(
+        "https://arxivxplorer.com/?q=test&cats=cs.CV&year=2026",
+        search_client=search_client,
+        status_callback=messages.append,
+    )
+
+    assert [seed.url for seed in result.seeds] == ["https://arxiv.org/abs/2501.00001"]
+    assert search_client.pages == [1, 2]
+    assert any("Reached arXiv Xplorer page limit" in message for message in messages)
+
+
+@pytest.mark.anyio
+async def test_export_url_to_csv_writes_sorted_csv_in_output_dir(tmp_path: Path):
+    class FakeSearchClient:
+        async def search(self, query, page: int):
+            data = {
+                1: [
+                    {"id": "2501.00001", "journal": "arxiv", "title": "Older"},
+                    {"id": "2502.00002", "journal": "arxiv", "title": "Newer"},
+                ],
+                2: [],
+            }
+            return data[page]
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            mapping = {
+                "https://arxiv.org/abs/2501.00001": "https://github.com/foo/old",
+                "https://arxiv.org/abs/2502.00002": "https://github.com/foo/new",
+            }
+            return mapping[seed.url]
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            mapping = {
+                ("foo", "old"): (10, None),
+                ("foo", "new"): (20, None),
+            }
+            return mapping[(owner, repo)]
+
+    result = await export_url_to_csv(
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026&year=2025&year=2024",
+        output_dir=tmp_path,
+        search_client=FakeSearchClient(),
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+    )
+
+    with result.csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert result.csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv"
+    assert rows == [
+        {
+            "Name": "Newer",
+            "Url": "https://arxiv.org/abs/2502.00002",
+            "Github": "https://github.com/foo/new",
+            "Stars": "20",
+        },
+        {
+            "Name": "Older",
+            "Url": "https://arxiv.org/abs/2501.00001",
+            "Github": "https://github.com/foo/old",
+            "Stars": "10",
+        },
+    ]
+
+
+@pytest.mark.anyio
+async def test_run_url_mode_prints_fetch_and_paper_progress(tmp_path: Path, capsys):
+    input_url = "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026"
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSearchClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+        async def search(self, query, page: int):
+            data = {
+                1: [
+                    {"id": "2501.00001", "journal": "arxiv", "title": "Paper A"},
+                ],
+                2: [],
+            }
+            return data[page]
+
+    class FakeDiscoveryClient:
+        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+            self.huggingface_token = huggingface_token
+            self.alphaxiv_token = alphaxiv_token
+
+        async def resolve_github_url(self, seed):
+            return "https://github.com/foo/bar"
+
+    class FakeGitHubClient:
+        def __init__(self, session, github_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+            self.github_token = github_token
+
+        async def get_star_count(self, owner, repo):
+            return 11, None
+
+    exit_code = await run_url_mode(
+        input_url,
+        output_dir=tmp_path,
+        session_factory=lambda **kwargs: FakeSession(),
+        search_client_cls=FakeSearchClient,
+        discovery_client_cls=FakeDiscoveryClient,
+        github_client_cls=FakeGitHubClient,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Fetching arXiv Xplorer page 1" in captured.out
+    assert "Found 1 papers" in captured.out
+    assert "[1/1] Paper A" in captured.out
+    assert "foo/bar" in captured.out
+    assert "Wrote CSV:" in captured.out
