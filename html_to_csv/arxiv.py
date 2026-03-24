@@ -6,23 +6,10 @@ import xml.etree.ElementTree as ET
 import aiohttp
 
 from shared.http import MAX_RETRIES, RateLimiter, build_timeout
+from shared.paper_identity import extract_arxiv_id
 
 
-ARXIV_ID_PATTERN = re.compile(
-    r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?(?:\.pdf)?",
-    re.IGNORECASE,
-)
 ARXIV_SUBMITTED_PATTERN = re.compile(r"\[Submitted on (\d{1,2} [A-Za-z]{3} \d{4})\b", re.IGNORECASE)
-
-
-def extract_arxiv_id(url: str) -> str | None:
-    if not url or not isinstance(url, str):
-        return None
-
-    match = ARXIV_ID_PATTERN.search(url.strip())
-    if not match:
-        return None
-    return match.group(1)
 
 
 def normalize_title_for_matching(title: str) -> str:

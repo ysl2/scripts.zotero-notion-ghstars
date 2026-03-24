@@ -5,19 +5,7 @@ import aiohttp
 
 from shared.github import normalize_github_url
 from shared.http import MAX_RETRIES, RateLimiter
-
-
-ARXIV_ID_PATTERN = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?(?:\.pdf)?", re.IGNORECASE)
-
-
-def extract_arxiv_id(url: str) -> str | None:
-    if not url or not isinstance(url, str):
-        return None
-
-    match = ARXIV_ID_PATTERN.search(url.strip())
-    if not match:
-        return None
-    return match.group(1)
+from shared.paper_identity import extract_arxiv_id
 
 
 def find_github_url_in_text(text: str) -> str | None:

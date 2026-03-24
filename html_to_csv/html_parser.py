@@ -1,25 +1,7 @@
-import re
 from html.parser import HTMLParser
 
 from html_to_csv.models import PaperSeed
-
-
-ARXIV_URL_PATTERN = re.compile(
-    r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?(?:\.pdf)?",
-    re.IGNORECASE,
-)
-
-
-def normalize_arxiv_url(url: str) -> str | None:
-    """Normalize arXiv URLs to a canonical versionless abs URL."""
-    if not url or not isinstance(url, str):
-        return None
-
-    match = ARXIV_URL_PATTERN.search(url.strip())
-    if not match:
-        return None
-
-    return f"https://arxiv.org/abs/{match.group(1)}"
+from shared.paper_identity import normalize_arxiv_url
 
 
 class PaperCardParser(HTMLParser):

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from csv_update.runner import run_csv_mode
 from html_to_csv.runner import run_html_mode
 from notion_sync.runner import run_notion_mode
 
@@ -17,9 +18,9 @@ def _normalize_argv(argv: list[str] | None) -> list[str]:
     return list(argv)
 
 
-def _validate_html_path(raw_path: str) -> Path | None:
+def _validate_input_path(raw_path: str) -> Path | None:
     path = Path(raw_path).expanduser()
-    if path.suffix.lower() != ".html" or not path.exists() or not path.is_file():
+    if path.suffix.lower() not in {".html", ".csv"} or not path.exists() or not path.is_file():
         return None
     return path
 
@@ -34,12 +35,14 @@ async def async_main(argv: list[str] | None = None) -> int:
     if not args:
         return await run_notion_mode()
 
-    html_path = _validate_html_path(args[0])
-    if html_path is None:
-        print(f"Input HTML not found or invalid: {Path(args[0]).expanduser()}", file=sys.stderr)
+    input_path = _validate_input_path(args[0])
+    if input_path is None:
+        print(f"Input file not found or invalid: {Path(args[0]).expanduser()}", file=sys.stderr)
         return 1
 
-    return await run_html_mode(html_path)
+    if input_path.suffix.lower() == ".html":
+        return await run_html_mode(input_path)
+    return await run_csv_mode(input_path)
 
 
 def main(argv: list[str] | None = None) -> int:

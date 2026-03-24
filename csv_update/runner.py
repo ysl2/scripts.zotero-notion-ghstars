@@ -4,7 +4,7 @@ from pathlib import Path
 
 import aiohttp
 
-from html_to_csv.pipeline import convert_html_to_csv
+from csv_update.pipeline import update_csv_file
 from shared.discovery import DiscoveryClient
 from shared.github import GitHubClient
 from shared.http import build_timeout
@@ -18,20 +18,16 @@ CONCURRENT_LIMIT = DEFAULT_CONCURRENT_LIMIT
 REQUEST_DELAY = 0.2
 
 
-def print_progress(outcome, total: int) -> None:
-    print_paper_progress(outcome, total, is_minor_reason=is_minor_skip_reason)
-
-
-async def run_html_mode(
-    html_path: Path | str,
+async def run_csv_mode(
+    csv_path: Path | str,
     *,
     session_factory=aiohttp.ClientSession,
     discovery_client_cls=DiscoveryClient,
     github_client_cls=GitHubClient,
 ) -> int:
-    html_path = Path(html_path).expanduser()
-    if not html_path.exists() or not html_path.is_file():
-        print(f"Input HTML not found: {html_path}", file=sys.stderr)
+    csv_path = Path(csv_path).expanduser()
+    if not csv_path.exists() or not csv_path.is_file():
+        print(f"Input CSV not found: {csv_path}", file=sys.stderr)
         return 1
 
     config = load_runtime_config(dict(os.environ))
@@ -53,21 +49,25 @@ async def run_html_mode(
             min_interval=REQUEST_DELAY,
         )
 
-        result = await convert_html_to_csv(
-            html_path,
+        result = await update_csv_file(
+            csv_path,
             discovery_client=discovery_client,
             github_client=github_client,
             status_callback=lambda message: print(message, flush=True),
-            progress_callback=print_progress,
+            progress_callback=lambda outcome, total: print_paper_progress(
+                outcome,
+                total,
+                is_minor_reason=is_minor_skip_reason,
+            ),
         )
 
     print_summary(
-        "Resolved",
-        result.resolved,
+        "Updated",
+        result.updated,
         result.skipped,
         is_minor_reason=is_minor_skip_reason,
         detail_label="Paper URL",
-        minor_header="Skipped rows (CSV rows still written):",
+        minor_header="Skipped rows (CSV rows preserved):",
     )
-    print(f"Wrote CSV: {result.csv_path}", flush=True)
+    print(f"Updated CSV: {result.csv_path}", flush=True)
     return 0

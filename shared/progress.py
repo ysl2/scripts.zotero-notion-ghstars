@@ -1,3 +1,6 @@
+from shared.github import extract_owner_repo
+
+
 class Colors:
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -104,3 +107,32 @@ def print_summary(
                 print(colored(f'   Github URL: {item["github_url"]}', Colors.GRAY))
             if item.get("detail_url"):
                 print(colored(f'   {detail_label}: {item["detail_url"]}', Colors.GRAY))
+
+
+def print_paper_progress(outcome, total: int, *, is_minor_reason) -> None:
+    owner_repo = extract_owner_repo(outcome.record.github) if outcome.record.github else None
+    current_stars = getattr(outcome, "current_stars", None)
+    source_label = getattr(outcome, "source_label", None)
+    github_url_set = getattr(outcome, "github_url_set", None)
+
+    if outcome.reason is None:
+        print_item_success(
+            outcome.index,
+            total,
+            outcome.record.name,
+            owner_repo=owner_repo,
+            current_stars=current_stars,
+            new_stars=outcome.record.stars if isinstance(outcome.record.stars, int) else None,
+            source_label=source_label,
+            github_url_set=github_url_set,
+        )
+        return
+
+    print_item_skip(
+        outcome.index,
+        total,
+        outcome.record.name,
+        outcome.reason,
+        owner_repo=owner_repo,
+        minor=is_minor_reason(outcome.reason),
+    )

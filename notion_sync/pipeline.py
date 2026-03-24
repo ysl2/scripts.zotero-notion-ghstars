@@ -1,8 +1,8 @@
 import asyncio
-import re
 from types import SimpleNamespace
 
 from shared.github import extract_owner_repo, is_valid_github_repo_url, normalize_github_url
+from shared.paper_identity import extract_arxiv_id
 from shared.progress import print_item_skip, print_item_success
 from shared.skip_reasons import is_minor_skip_reason
 
@@ -82,17 +82,7 @@ def get_page_url(page: dict) -> str:
 
 
 def extract_arxiv_id_from_url(url: str) -> str | None:
-    if not url or not isinstance(url, str):
-        return None
-
-    match = re.search(
-        r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?(?:\.pdf)?",
-        url,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1)
-    return None
+    return extract_arxiv_id(url)
 
 
 def get_arxiv_id_from_page(page: dict) -> str | None:

@@ -4,8 +4,7 @@ from pathlib import Path
 from html_to_csv.csv_writer import write_records_to_csv
 from html_to_csv.models import ConversionResult, PaperOutcome, PaperRecord, PaperSeed
 from html_to_csv.html_parser import parse_paper_seeds_from_html
-from shared.discovery import resolve_github_url
-from shared.github import extract_owner_repo
+from shared.paper_enrichment import enrich_paper
 
 
 async def build_paper_outcome(
@@ -15,41 +14,23 @@ async def build_paper_outcome(
     discovery_client,
     github_client,
 ) -> PaperOutcome:
-    github_url = await _resolve_github(seed, discovery_client)
-
-    reason = None
-    stars = ""
-    if github_url:
-        owner_repo = extract_owner_repo(github_url)
-        if not owner_repo:
-            reason = "Discovered URL is not a valid GitHub repository"
-            github_url = ""
-        else:
-            stars_result, _stars_error = await github_client.get_star_count(*owner_repo)
-            if _stars_error:
-                reason = _stars_error
-            elif stars_result is not None:
-                stars = stars_result
-    else:
-        reason = "No Github URL found from discovery"
+    enrichment = await enrich_paper(
+        name=seed.name,
+        url=seed.url,
+        discovery_client=discovery_client,
+        github_client=github_client,
+    )
 
     return PaperOutcome(
         index=index,
         record=PaperRecord(
-            name=seed.name,
-            url=seed.url,
-            github=github_url or "",
-            stars=stars,
+            name=enrichment.name,
+            url=enrichment.url,
+            github=enrichment.github_url or "",
+            stars=enrichment.stars if enrichment.reason is None else "",
         ),
-        reason=reason,
+        reason=enrichment.reason,
     )
-
-
-async def _resolve_github(seed: PaperSeed, discovery_client) -> str | None:
-    resolver = getattr(discovery_client, "resolve_github_url", None)
-    if callable(resolver):
-        return await resolver(seed)
-    return await resolve_github_url(seed, discovery_client)
 
 
 async def convert_html_to_csv(
