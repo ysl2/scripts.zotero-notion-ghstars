@@ -113,7 +113,7 @@ Optional arXiv source fields for fallback discovery:
 - `Paper URL`
 - `Link`
 
-When `Github` is empty or `WIP`, the sync flow tries to discover the repo from the paper:
+When `Github` is empty, the sync flow tries to discover the repo from the paper:
 
 1. Hugging Face paper page
 2. Hugging Face paper search

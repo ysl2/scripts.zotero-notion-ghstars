@@ -41,8 +41,6 @@ def classify_github_value(value) -> str:
     normalized = value.strip()
     if not normalized:
         return "empty"
-    if normalized.lower() == "wip":
-        return "wip"
     if is_valid_github_repo_url(normalized):
         return "valid_github"
     return "other"

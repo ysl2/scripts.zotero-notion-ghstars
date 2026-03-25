@@ -58,7 +58,7 @@ def test_page_helpers_read_title_github_and_stars():
 def test_classify_github_value_covers_expected_states():
     assert classify_github_value(None) == "empty"
     assert classify_github_value("   ") == "empty"
-    assert classify_github_value("WIP") == "wip"
+    assert classify_github_value("WIP") == "other"
     assert classify_github_value("https://github.com/foo/bar") == "valid_github"
     assert classify_github_value("https://example.com/project") == "other"
 
