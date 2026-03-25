@@ -32,8 +32,9 @@ def test_output_csv_path_for_huggingface_papers_url_uses_path_and_query(tmp_path
     assert csv_path == tmp_path / "huggingface-papers-month-2026-03-semantic.csv"
 
 
-def test_extract_paper_seeds_from_huggingface_html_prefers_search_results_for_query_pages():
+def test_extract_paper_seeds_from_huggingface_html_prefers_rendered_paper_links_when_present():
     payload = {
+        "periodType": "month",
         "query": {"q": "semantic"},
         "dailyPapers": [
             {
@@ -53,6 +54,12 @@ def test_extract_paper_seeds_from_huggingface_html_prefers_search_results_for_qu
         ],
     }
     html_text = (
+        '<a href="/papers/2502.00002" class="line-clamp-3 cursor-pointer text-balance">'
+        'Search <span class="highlight">Match</span>'
+        "</a>"
+        '<a href="/papers/2502.00003" class="line-clamp-3 cursor-pointer text-balance">'
+        "Another Match"
+        "</a>"
         '<div class="SVELTE_HYDRATER contents" '
         f'data-target="DailyPapers" data-props="{html.escape(json.dumps(payload))}"></div>'
     )
@@ -65,33 +72,20 @@ def test_extract_paper_seeds_from_huggingface_html_prefers_search_results_for_qu
     ]
 
 
-def test_extract_paper_seeds_from_huggingface_html_limits_month_query_pages_to_month_results():
+def test_extract_paper_seeds_from_huggingface_html_uses_payload_titles_for_rendered_ids_when_available():
     payload = {
-        "periodType": "month",
-        "dateString": "2026-03-01",
         "query": {"q": "semantic"},
-        "dailyPapers": [
-            {
-                "paper": {"id": "2603.00001", "title": "March Match"},
-                "title": "March Match",
-            },
-            {
-                "paper": {"id": "2603.00002", "title": "March Other"},
-                "title": "March Other",
-            },
-        ],
         "searchResults": [
             {
-                "paper": {"id": "2603.00001", "title": "March Match"},
-                "title": "March Match",
-            },
-            {
-                "paper": {"id": "2502.00003", "title": "Global Match Outside Month"},
-                "title": "Global Match Outside Month",
-            },
+                "paper": {"id": "1812.07003", "title": "3D-SIS"},
+                "title": "3D-SIS: 3D Semantic Instance Segmentation of RGB-D Scans",
+            }
         ],
     }
     html_text = (
+        '<a href="/papers/1812.07003" class="line-clamp-3 cursor-pointer text-balance">'
+        '3D <span class="highlight">-</span>SIS: 3D Semantic Instance Segmentation of RGB-D Scans'
+        "</a>"
         '<div class="SVELTE_HYDRATER contents" '
         f'data-target="DailyPapers" data-props="{html.escape(json.dumps(payload))}"></div>'
     )
@@ -99,7 +93,7 @@ def test_extract_paper_seeds_from_huggingface_html_limits_month_query_pages_to_m
     seeds = extract_paper_seeds_from_huggingface_html(html_text)
 
     assert [(seed.name, seed.url) for seed in seeds] == [
-        ("March Match", "https://arxiv.org/abs/2603.00001"),
+        ("3D-SIS: 3D Semantic Instance Segmentation of RGB-D Scans", "https://arxiv.org/abs/1812.07003"),
     ]
 
 

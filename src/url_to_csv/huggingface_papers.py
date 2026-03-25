@@ -56,6 +56,11 @@ def output_csv_path_for_huggingface_papers_url(raw_url: str, *, output_dir: Path
 
 
 def extract_paper_seeds_from_huggingface_html(html_text: str) -> list[PaperSeed]:
+    rendered_seeds = _extract_rendered_paper_seeds(html_text)
+    if rendered_seeds:
+        payload = _extract_daily_papers_payload(html_text)
+        return _apply_payload_titles(rendered_seeds, payload)
+
     payload = _extract_daily_papers_payload(html_text)
     items = _select_paper_items(payload)
 
@@ -67,6 +72,40 @@ def extract_paper_seeds_from_huggingface_html(html_text: str) -> list[PaperSeed]
             seeds.append(seed)
             seen_urls.add(seed.url)
     return seeds
+
+
+def _extract_rendered_paper_seeds(html_text: str) -> list[PaperSeed]:
+    pattern = re.compile(
+        r'<a[^>]+href="/papers/([0-9]{4}\.[0-9]{4,5})"[^>]*class="line-clamp-3[^"]*"[^>]*>(.*?)</a>',
+        re.S,
+    )
+
+    seeds: list[PaperSeed] = []
+    seen_urls: set[str] = set()
+    for paper_id, inner_html in pattern.findall(html_text):
+        title = _normalize_rendered_anchor_text(inner_html)
+        normalized_url = normalize_arxiv_url(f"https://arxiv.org/abs/{paper_id}")
+        if not title or not normalized_url or normalized_url in seen_urls:
+            continue
+
+        seeds.append(PaperSeed(name=title, url=normalized_url))
+        seen_urls.add(normalized_url)
+
+    return seeds
+
+
+def _apply_payload_titles(rendered_seeds: list[PaperSeed], payload: dict) -> list[PaperSeed]:
+    title_by_url: dict[str, str] = {}
+    for items in (payload.get("searchResults"), payload.get("dailyPapers")):
+        for item in _filter_paper_items(items):
+            seed = _paper_seed_from_huggingface_item(item)
+            if seed and seed.url not in title_by_url:
+                title_by_url[seed.url] = seed.name
+
+    return [
+        PaperSeed(name=title_by_url.get(seed.url, seed.name), url=seed.url)
+        for seed in rendered_seeds
+    ]
 
 
 async def fetch_paper_seeds_from_huggingface_papers_url(
@@ -180,6 +219,12 @@ def _extract_paper_id(item: dict) -> str | None:
     if not ARXIV_ID_PATTERN.match(paper_id):
         return None
     return paper_id
+
+
+def _normalize_rendered_anchor_text(inner_html: str) -> str:
+    without_comments = re.sub(r"<!--.*?-->", " ", inner_html, flags=re.S)
+    without_tags = re.sub(r"<[^>]+>", " ", without_comments)
+    return html_lib.unescape(" ".join(without_tags.split())).strip()
 
 
 def _paper_seed_from_huggingface_item(item: dict) -> PaperSeed | None:
