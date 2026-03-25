@@ -136,15 +136,21 @@ async def test_fetch_paper_seeds_from_url_reads_semanticscholar_search_results()
             </a>
             """
 
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            assert title == "Search Match"
+            return "2502.00002", "title_search_exact", None
+
     messages = []
     result = await fetch_paper_seeds_from_url(
         "https://www.semanticscholar.org/search?q=semantic%203d%20reconstruction&sort=pub-date",
         semanticscholar_client=FakeSemanticScholarClient(),
+        arxiv_client=FakeArxivClient(),
         status_callback=messages.append,
     )
 
     assert [seed.name for seed in result.seeds] == ["Search Match"]
-    assert [seed.url for seed in result.seeds] == ["https://www.semanticscholar.org/paper/Search-Match/abc123"]
+    assert [seed.url for seed in result.seeds] == ["https://arxiv.org/abs/2502.00002"]
     assert any("Fetching Semantic Scholar search results page 1" in message for message in messages)
 
 
@@ -284,13 +290,25 @@ async def test_export_url_to_csv_writes_semanticscholar_results_in_output_dir(tm
             <a data-test-id="title-link" href="/paper/Older/abc123">
               <h2 class="cl-paper-title">Older</h2>
             </a>
+            <a data-test-id="title-link" href="/paper/Missing/ghi789">
+              <h2 class="cl-paper-title">Missing</h2>
+            </a>
             """
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            mapping = {
+                "Older": ("2501.00001", "title_search_exact", None),
+                "Newer": ("2502.00002", "title_search_exact", None),
+                "Missing": (None, None, "No arXiv ID found from title search"),
+            }
+            return mapping[title]
 
     class FakeDiscoveryClient:
         async def resolve_github_url(self, seed):
             mapping = {
-                "https://www.semanticscholar.org/paper/Older/abc123": "https://github.com/foo/old",
-                "https://www.semanticscholar.org/paper/Newer/def456": "https://github.com/foo/new",
+                "https://arxiv.org/abs/2501.00001": "https://github.com/foo/old",
+                "https://arxiv.org/abs/2502.00002": "https://github.com/foo/new",
             }
             return mapping[seed.url]
 
@@ -306,6 +324,7 @@ async def test_export_url_to_csv_writes_semanticscholar_results_in_output_dir(tm
         "https://www.semanticscholar.org/search?q=semantic%203d%20reconstruction&sort=pub-date",
         output_dir=tmp_path,
         semanticscholar_client=FakeSemanticScholarClient(),
+        arxiv_client=FakeArxivClient(),
         discovery_client=FakeDiscoveryClient(),
         github_client=FakeGitHubClient(),
     )
@@ -317,15 +336,21 @@ async def test_export_url_to_csv_writes_semanticscholar_results_in_output_dir(tm
     assert rows == [
         {
             "Name": "Newer",
-            "Url": "https://www.semanticscholar.org/paper/Newer/def456",
+            "Url": "https://arxiv.org/abs/2502.00002",
             "Github": "https://github.com/foo/new",
             "Stars": "20",
         },
         {
             "Name": "Older",
-            "Url": "https://www.semanticscholar.org/paper/Older/abc123",
+            "Url": "https://arxiv.org/abs/2501.00001",
             "Github": "https://github.com/foo/old",
             "Stars": "10",
+        },
+        {
+            "Name": "Missing",
+            "Url": "",
+            "Github": "",
+            "Stars": "",
         },
     ]
 
@@ -500,6 +525,14 @@ async def test_run_url_mode_supports_semanticscholar_url(tmp_path: Path, capsys)
             </a>
             """
 
+    class FakeArxivClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+        async def get_arxiv_id_by_title(self, title: str):
+            assert title == "Paper A"
+            return "2501.00001", "title_search_exact", None
+
     class FakeDiscoveryClient:
         def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
             self.session = session
@@ -524,6 +557,7 @@ async def test_run_url_mode_supports_semanticscholar_url(tmp_path: Path, capsys)
         search_client_cls=FakeSearchClient,
         huggingface_papers_client_cls=FakeHuggingFacePapersClient,
         semanticscholar_client_cls=FakeSemanticScholarClient,
+        arxiv_client_cls=FakeArxivClient,
         discovery_client_cls=FakeDiscoveryClient,
         github_client_cls=FakeGitHubClient,
     )
@@ -531,6 +565,7 @@ async def test_run_url_mode_supports_semanticscholar_url(tmp_path: Path, capsys)
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Fetching Semantic Scholar search results page 1" in captured.out
+    assert "Resolving arXiv URLs from Semantic Scholar titles" in captured.out
     assert "Found 1 papers" in captured.out
     assert "[1/1] Paper A" in captured.out
     assert "foo/bar" in captured.out

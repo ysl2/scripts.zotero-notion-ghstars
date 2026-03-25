@@ -92,7 +92,7 @@ def test_extract_paper_seeds_from_semanticscholar_html_reads_title_links():
 
 
 @pytest.mark.anyio
-async def test_fetch_paper_seeds_from_semanticscholar_url_fetches_rendered_pages_and_deduplicates(tmp_path: Path):
+async def test_fetch_paper_seeds_from_semanticscholar_url_resolves_titles_to_arxiv_urls(tmp_path: Path):
     class FakeSemanticScholarClient:
         def __init__(self):
             self.calls = []
@@ -117,7 +117,20 @@ async def test_fetch_paper_seeds_from_semanticscholar_url_fetches_rendered_pages
             </a>
             """
 
+    class FakeArxivClient:
+        def __init__(self):
+            self.calls = []
+
+        async def get_arxiv_id_by_title(self, title: str):
+            self.calls.append(title)
+            mapping = {
+                "Paper A": ("2501.00001", "title_search_exact", None),
+                "Paper B": ("2501.00002", "title_search_exact", None),
+            }
+            return mapping[title]
+
     client = FakeSemanticScholarClient()
+    arxiv_client = FakeArxivClient()
     messages = []
     result = await fetch_paper_seeds_from_semanticscholar_url(
         "https://www.semanticscholar.org/search"
@@ -128,14 +141,16 @@ async def test_fetch_paper_seeds_from_semanticscholar_url_fetches_rendered_pages
         "&q=semantic%203d%20reconstruction"
         "&sort=pub-date",
         semanticscholar_client=client,
+        arxiv_client=arxiv_client,
         output_dir=tmp_path,
         status_callback=messages.append,
     )
 
     assert [(seed.name, seed.url) for seed in result.seeds] == [
-        ("Paper A", "https://www.semanticscholar.org/paper/Paper-A/abc123"),
-        ("Paper B", "https://www.semanticscholar.org/paper/Paper-B/def456"),
+        ("Paper A", "https://arxiv.org/abs/2501.00001"),
+        ("Paper B", "https://arxiv.org/abs/2501.00002"),
     ]
+    assert arxiv_client.calls == ["Paper A", "Paper B"]
     assert client.calls[0] == (
         "https://www.semanticscholar.org/search"
         "?year%5B0%5D=2025"
@@ -152,3 +167,37 @@ async def test_fetch_paper_seeds_from_semanticscholar_url_fetches_rendered_pages
     )
     assert any("Fetching Semantic Scholar search results page 1" in message for message in messages)
     assert any("Fetched page 2: 2 results" in message for message in messages)
+    assert any("Resolving arXiv URLs from Semantic Scholar titles" in message for message in messages)
+
+
+@pytest.mark.anyio
+async def test_fetch_paper_seeds_from_semanticscholar_url_leaves_url_blank_when_title_search_fails(tmp_path: Path):
+    class FakeSemanticScholarClient:
+        async def fetch_search_page_html(self, url: str):
+            return """
+            <div class="cl-pager" data-total-pages="1" data-test-id="result-page-pagination"></div>
+            <a data-test-id="title-link" href="/paper/Found/abc123">
+              <h2 class="cl-paper-title">Found Paper</h2>
+            </a>
+            <a data-test-id="title-link" href="/paper/Missing/def456">
+              <h2 class="cl-paper-title">Missing Paper</h2>
+            </a>
+            """
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            if title == "Found Paper":
+                return "2501.00001", "title_search_exact", None
+            return None, None, "No arXiv ID found from title search"
+
+    result = await fetch_paper_seeds_from_semanticscholar_url(
+        "https://www.semanticscholar.org/search?q=semantic%203d%20reconstruction&sort=pub-date",
+        semanticscholar_client=FakeSemanticScholarClient(),
+        arxiv_client=FakeArxivClient(),
+        output_dir=tmp_path,
+    )
+
+    assert [(seed.name, seed.url) for seed in result.seeds] == [
+        ("Found Paper", "https://arxiv.org/abs/2501.00001"),
+        ("Missing Paper", ""),
+    ]

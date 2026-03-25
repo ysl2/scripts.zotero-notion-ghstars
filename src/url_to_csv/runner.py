@@ -4,6 +4,7 @@ from pathlib import Path
 
 import aiohttp
 
+from src.shared.arxiv import ArxivClient
 from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient
 from src.shared.http import build_timeout
@@ -27,6 +28,7 @@ async def run_url_mode(
     *,
     output_dir: Path | None = None,
     session_factory=aiohttp.ClientSession,
+    arxiv_client_cls=ArxivClient,
     search_client_cls=ArxivXplorerSearchClient,
     huggingface_papers_client_cls=HuggingFacePapersClient,
     semanticscholar_client_cls=SemanticScholarSearchClient,
@@ -40,6 +42,12 @@ async def run_url_mode(
     config = load_runtime_config(dict(os.environ))
 
     async with session_factory(timeout=build_timeout()) as session:
+        arxiv_client = build_client(
+            arxiv_client_cls,
+            session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
         search_client = build_client(
             search_client_cls,
             session,
@@ -80,6 +88,7 @@ async def run_url_mode(
             search_client=search_client,
             huggingface_papers_client=huggingface_papers_client,
             semanticscholar_client=semanticscholar_client,
+            arxiv_client=arxiv_client,
             discovery_client=discovery_client,
             github_client=github_client,
             status_callback=lambda message: print(message, flush=True),

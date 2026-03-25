@@ -20,6 +20,7 @@ async def fetch_paper_seeds_from_url(
     search_client=None,
     huggingface_papers_client=None,
     semanticscholar_client=None,
+    arxiv_client=None,
     output_dir: Path | None = None,
     status_callback=None,
 ) -> FetchedSeedsResult:
@@ -47,9 +48,12 @@ async def fetch_paper_seeds_from_url(
     if source == UrlSource.SEMANTIC_SCHOLAR:
         if semanticscholar_client is None:
             raise ValueError("Missing Semantic Scholar client")
+        if arxiv_client is None:
+            raise ValueError("Missing arXiv client")
         return await fetch_paper_seeds_from_semanticscholar_url(
             input_url,
             semanticscholar_client=semanticscholar_client,
+            arxiv_client=arxiv_client,
             output_dir=output_dir,
             status_callback=status_callback,
         )
@@ -63,6 +67,7 @@ async def export_url_to_csv(
     search_client=None,
     huggingface_papers_client=None,
     semanticscholar_client=None,
+    arxiv_client=None,
     discovery_client,
     github_client,
     output_dir: Path | None = None,
@@ -74,6 +79,7 @@ async def export_url_to_csv(
         search_client=search_client,
         huggingface_papers_client=huggingface_papers_client,
         semanticscholar_client=semanticscholar_client,
+        arxiv_client=arxiv_client,
         output_dir=output_dir,
         status_callback=status_callback,
     )
