@@ -202,6 +202,7 @@ async def test_run_url_mode_prints_fetch_and_paper_progress(tmp_path: Path, caps
     assert exit_code == 0
     assert "Fetching arXiv Xplorer page 1" in captured.out
     assert "Found 1 papers" in captured.out
+    assert "Starting concurrent enrichment (10 workers)" in captured.out
     assert "[1/1] Paper A" in captured.out
     assert "foo/bar" in captured.out
     assert "Wrote CSV:" in captured.out

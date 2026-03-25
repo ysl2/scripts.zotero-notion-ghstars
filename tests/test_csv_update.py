@@ -146,6 +146,50 @@ async def test_update_csv_file_appends_missing_github_and_stars_columns(tmp_path
 
 
 @pytest.mark.anyio
+async def test_update_csv_file_fills_blank_stars_for_existing_github(tmp_path: Path):
+    csv_path = tmp_path / "papers.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Name,Url,Github,Stars",
+                "Paper A,https://arxiv.org/abs/2603.20000v2,https://github.com/foo/bar,",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            raise AssertionError("discovery should not run when Github already exists")
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            assert (owner, repo) == ("foo", "bar")
+            return 11, None
+
+    result = await update_csv_file(
+        csv_path,
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+    )
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert result.updated == 1
+    assert result.skipped == []
+    assert rows == [
+        {
+            "Name": "Paper A",
+            "Url": "https://arxiv.org/abs/2603.20000",
+            "Github": "https://github.com/foo/bar",
+            "Stars": "11",
+        }
+    ]
+
+
+@pytest.mark.anyio
 async def test_run_csv_mode_prints_progress_and_updates_file(tmp_path: Path, capsys):
     csv_path = tmp_path / "papers.csv"
     csv_path.write_text(

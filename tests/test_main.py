@@ -124,6 +124,7 @@ async def test_run_html_mode_prints_progress_before_completion(tmp_path: Path, c
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Found 1 papers" in captured.out
+    assert "Starting concurrent enrichment (10 workers)" in captured.out
     assert "[1/1] Test Paper" in captured.out
     assert "foo/bar" in captured.out
     assert "Updated: N/A → 0" in captured.out
