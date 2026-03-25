@@ -1,6 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
+from src.shared.discovery import resolve_arxiv_id_by_title
 from src.shared.github import extract_owner_repo, is_valid_github_repo_url, normalize_github_url
 from src.shared.paper_identity import extract_arxiv_id
 from src.shared.progress import print_item_skip, print_item_success
@@ -92,7 +93,7 @@ def get_arxiv_id_from_page(page: dict) -> str | None:
             return arxiv_id
     return None
 
-async def resolve_arxiv_id_for_page(page: dict, arxiv_client=None) -> tuple[str | None, str | None, str | None]:
+async def resolve_arxiv_id_for_page(page: dict, discovery_client=None, arxiv_client=None) -> tuple[str | None, str | None, str | None]:
     arxiv_id = get_arxiv_id_from_page(page)
     if arxiv_id:
         return arxiv_id, "url_field", None
@@ -100,10 +101,14 @@ async def resolve_arxiv_id_for_page(page: dict, arxiv_client=None) -> tuple[str 
     title = get_page_title(page)
     if not title:
         return None, None, "No arXiv ID found for discovery lookup"
-    if arxiv_client is None:
+    if arxiv_client is None and discovery_client is None:
         return None, None, "No arXiv ID found for discovery lookup"
 
-    arxiv_id, source, error = await arxiv_client.get_arxiv_id_by_title(title)
+    arxiv_id, source, error = await resolve_arxiv_id_by_title(
+        title,
+        discovery_client=discovery_client,
+        arxiv_client=arxiv_client,
+    )
     if arxiv_id:
         return arxiv_id, source, None
     return None, None, error or "No arXiv ID found from title search"
@@ -141,7 +146,11 @@ async def resolve_repo_for_page(page: dict, discovery_client, arxiv_client=None)
                 "reason": "No fallback discovery token configured",
             }
 
-    arxiv_id, arxiv_source, error = await resolve_arxiv_id_for_page(page, arxiv_client)
+    arxiv_id, arxiv_source, error = await resolve_arxiv_id_for_page(
+        page,
+        discovery_client=discovery_client,
+        arxiv_client=arxiv_client,
+    )
     if not arxiv_id:
         return {
             "github_url": None,

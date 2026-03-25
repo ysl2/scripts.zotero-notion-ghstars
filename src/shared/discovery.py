@@ -1,14 +1,18 @@
 import asyncio
 import html as html_lib
+import json
 import re
 
 import aiohttp
 
+from src.shared.arxiv import normalize_title_for_matching
 from src.shared.github import normalize_github_url
 from src.shared.headless_browser import dump_rendered_html
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import extract_arxiv_id, normalize_semanticscholar_paper_url
 
+
+HUGGINGFACE_PAPER_ID_PATTERN = re.compile(r"^[0-9]{4}\.[0-9]{4,5}$")
 
 def find_github_url_in_text(text: str) -> str | None:
     if not text or not isinstance(text, str):
@@ -92,14 +96,88 @@ def find_github_url_in_semanticscholar_paper_html(html: str) -> str | None:
     return find_github_url_in_text(html)
 
 
-def find_huggingface_paper_id_in_search_html(html: str) -> str | None:
+def find_huggingface_paper_id_in_search_html(html: str, title_query: str | None = None) -> str | None:
     if not html or not isinstance(html, str):
         return None
+
+    if title_query:
+        paper_id, _source = extract_best_huggingface_paper_id_from_search_html(html, title_query)
+        if paper_id:
+            return paper_id
 
     match = re.search(r"/papers/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?", html)
     if match:
         return match.group(1)
     return None
+
+
+def extract_best_huggingface_paper_id_from_search_html(html: str, title_query: str) -> tuple[str | None, str | None]:
+    if not html or not title_query:
+        return None, None
+
+    title_query_norm = normalize_title_for_matching(title_query)
+    best_id = None
+    best_score = -1
+    best_source = None
+
+    for item in _iter_huggingface_search_items(html):
+        paper_id = str(item.get("paper_id") or "").strip()
+        title = normalize_title_for_matching(str(item.get("title") or ""))
+        if not HUGGINGFACE_PAPER_ID_PATTERN.match(paper_id) or not title:
+            continue
+
+        score = 0
+        source = None
+        if title == title_query_norm:
+            score = 100
+            source = "title_search_huggingface_exact"
+        elif title_query_norm in title:
+            score = 80
+            source = "title_search_huggingface_contained"
+        elif title in title_query_norm:
+            score = 60
+            source = "title_search_huggingface_contains_entry"
+
+        if score > 0 and score > best_score:
+            best_score = score
+            best_id = paper_id
+            best_source = source
+
+    return best_id, best_source
+
+
+def _iter_huggingface_search_items(html: str):
+    match = re.search(r'data-target="DailyPapers"[^>]*data-props="([^"]*)"', html)
+    if not match:
+        return []
+
+    try:
+        payload = json.loads(html_lib.unescape(match.group(1)))
+    except json.JSONDecodeError:
+        return []
+
+    items = payload.get("searchResults")
+    if not isinstance(items, list) or not items:
+        items = payload.get("dailyPapers")
+    if not isinstance(items, list):
+        return []
+
+    output = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        paper = item.get("paper", {})
+        if not isinstance(paper, dict):
+            continue
+
+        output.append(
+            {
+                "paper_id": str(paper.get("id") or "").strip(),
+                "title": " ".join(str(item.get("title") or paper.get("title") or "").split()).strip(),
+            }
+        )
+
+    return output
 
 
 def find_github_url_in_alphaxiv_legacy_payload(payload) -> str | None:
@@ -263,3 +341,29 @@ async def resolve_github_url(seed, client) -> str | None:
             return find_github_url_in_alphaxiv_legacy_payload(payload)
 
     return None
+
+
+async def resolve_arxiv_id_by_title(
+    title: str,
+    *,
+    discovery_client=None,
+    arxiv_client=None,
+) -> tuple[str | None, str | None, str | None]:
+    if not title:
+        return None, None, "Missing title"
+
+    if (
+        discovery_client is not None
+        and getattr(discovery_client, "huggingface_token", "")
+        and callable(getattr(discovery_client, "get_huggingface_search_html", None))
+    ):
+        search_html, error = await discovery_client.get_huggingface_search_html(title)
+        if not error:
+            arxiv_id, source = extract_best_huggingface_paper_id_from_search_html(search_html, title)
+            if arxiv_id:
+                return arxiv_id, source, None
+
+    if arxiv_client is not None:
+        return await arxiv_client.get_arxiv_id_by_title(title)
+
+    return None, None, "No arXiv ID found from title search"

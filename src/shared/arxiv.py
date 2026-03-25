@@ -1,6 +1,8 @@
 import asyncio
 from datetime import datetime
+import html as html_lib
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 
 import aiohttp
@@ -10,12 +12,25 @@ from src.shared.paper_identity import extract_arxiv_id
 
 
 ARXIV_SUBMITTED_PATTERN = re.compile(r"\[Submitted on (\d{1,2} [A-Za-z]{3} \d{4})\b", re.IGNORECASE)
+ARXIV_SEARCH_RESULT_PATTERN = re.compile(
+    r'<li class="arxiv-result">(.*?)</li>\s*(?=<li class="arxiv-result">|</ol>)',
+    re.IGNORECASE | re.S,
+)
+ARXIV_SEARCH_TITLE_PATTERN = re.compile(r'<p class="title is-5 mathjax">(.*?)</p>', re.IGNORECASE | re.S)
+ARXIV_SEARCH_LINK_PATTERN = re.compile(
+    r'href="https://arxiv.org/abs/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?"',
+    re.IGNORECASE,
+)
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+NON_ALNUM_PATTERN = re.compile(r"[^0-9a-z]+")
 
 
 def normalize_title_for_matching(title: str) -> str:
     if not title or not isinstance(title, str):
         return ""
-    return " ".join(title.split()).strip().lower()
+    normalized = unicodedata.normalize("NFKC", title).casefold()
+    normalized = NON_ALNUM_PATTERN.sub(" ", normalized)
+    return " ".join(normalized.split()).strip()
 
 
 def extract_best_arxiv_id_from_feed(feed_xml: str, title_query: str) -> tuple[str | None, str | None]:
@@ -58,7 +73,44 @@ def extract_best_arxiv_id_from_feed(feed_xml: str, title_query: str) -> tuple[st
             score = 60
             source = "title_search_contains_entry"
 
-        if score > best_score:
+        if score > 0 and score > best_score:
+            best_score = score
+            best_id = arxiv_id
+            best_source = source
+
+    return best_id, best_source
+
+
+def extract_best_arxiv_id_from_search_html(search_html: str, title_query: str) -> tuple[str | None, str | None]:
+    if not search_html or not title_query:
+        return None, None
+
+    title_query_norm = normalize_title_for_matching(title_query)
+    best_id = None
+    best_score = -1
+    best_source = None
+
+    for block in ARXIV_SEARCH_RESULT_PATTERN.findall(search_html):
+        title_match = ARXIV_SEARCH_TITLE_PATTERN.search(block)
+        id_match = ARXIV_SEARCH_LINK_PATTERN.search(block)
+        if not title_match or not id_match:
+            continue
+
+        title = normalize_title_for_matching(_strip_html_text(title_match.group(1)))
+        arxiv_id = id_match.group(1)
+        score = 0
+        source = None
+        if title == title_query_norm:
+            score = 100
+            source = "title_search_exact"
+        elif title_query_norm in title:
+            score = 80
+            source = "title_search_contained"
+        elif title in title_query_norm:
+            score = 60
+            source = "title_search_contains_entry"
+
+        if score > 0 and score > best_score:
             best_score = score
             best_id = arxiv_id
             best_source = source
@@ -182,19 +234,26 @@ class ArxivClient:
         if not title:
             return None, None, "Missing title"
 
-        feed_xml, error = await self._request_text(
-            "https://export.arxiv.org/api/query",
+        search_html, error = await self._request_text(
+            "https://arxiv.org/search/",
             params={
-                "search_query": f'ti:"{title}"',
-                "start": "0",
-                "max_results": "10",
+                "query": title,
+                "searchtype": "title",
+                "abstracts": "show",
+                "order": "-announced_date_first",
+                "size": "50",
             },
-            retry_prefix="arXiv API",
+            retry_prefix="arXiv search",
         )
         if error:
             return None, None, error
 
-        arxiv_id, source = extract_best_arxiv_id_from_feed(feed_xml, title)
+        arxiv_id, source = extract_best_arxiv_id_from_search_html(search_html, title)
         if not arxiv_id:
             return None, None, "No arXiv ID found from title search"
         return arxiv_id, source, None
+
+
+def _strip_html_text(text: str) -> str:
+    stripped = HTML_TAG_PATTERN.sub(" ", text)
+    return html_lib.unescape(" ".join(stripped.split())).strip()

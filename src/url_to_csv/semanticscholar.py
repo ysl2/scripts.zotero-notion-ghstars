@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from src.shared.paper_identity import build_arxiv_abs_url
+from src.shared.discovery import resolve_arxiv_id_by_title
 from src.shared.headless_browser import dump_rendered_html
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import normalize_semanticscholar_paper_url
@@ -146,6 +147,7 @@ async def fetch_paper_seeds_from_semanticscholar_url(
     input_url: str,
     *,
     semanticscholar_client,
+    discovery_client=None,
     arxiv_client,
     output_dir: Path | None = None,
     status_callback=None,
@@ -190,6 +192,7 @@ async def fetch_paper_seeds_from_semanticscholar_url(
 
     resolved_seeds = await _resolve_semanticscholar_titles_to_arxiv(
         seeds,
+        discovery_client=discovery_client,
         arxiv_client=arxiv_client,
     )
 
@@ -265,10 +268,17 @@ def _append_unique_seeds(target: list[PaperSeed], seen_urls: set[str], page_seed
 async def _resolve_semanticscholar_titles_to_arxiv(
     seeds: list[PaperSeed],
     *,
+    discovery_client=None,
     arxiv_client,
 ) -> list[PaperSeed]:
     tasks = [
-        asyncio.create_task(_resolve_arxiv_seed(seed, arxiv_client=arxiv_client))
+        asyncio.create_task(
+            _resolve_arxiv_seed(
+                seed,
+                discovery_client=discovery_client,
+                arxiv_client=arxiv_client,
+            )
+        )
         for seed in seeds
     ]
     resolved = await asyncio.gather(*tasks)
@@ -285,8 +295,12 @@ async def _resolve_semanticscholar_titles_to_arxiv(
     return output
 
 
-async def _resolve_arxiv_seed(seed: PaperSeed, *, arxiv_client) -> PaperSeed:
-    arxiv_id, _source, _error = await arxiv_client.get_arxiv_id_by_title(seed.name)
+async def _resolve_arxiv_seed(seed: PaperSeed, *, discovery_client=None, arxiv_client) -> PaperSeed:
+    arxiv_id, _source, _error = await resolve_arxiv_id_by_title(
+        seed.name,
+        discovery_client=discovery_client,
+        arxiv_client=arxiv_client,
+    )
     if not arxiv_id:
         return PaperSeed(name=seed.name, url="")
     return PaperSeed(name=seed.name, url=build_arxiv_abs_url(arxiv_id))

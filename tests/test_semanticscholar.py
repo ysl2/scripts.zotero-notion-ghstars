@@ -201,3 +201,55 @@ async def test_fetch_paper_seeds_from_semanticscholar_url_leaves_url_blank_when_
         ("Found Paper", "https://arxiv.org/abs/2501.00001"),
         ("Missing Paper", ""),
     ]
+
+
+@pytest.mark.anyio
+async def test_fetch_paper_seeds_from_semanticscholar_url_prefers_huggingface_title_resolution(tmp_path: Path):
+    class FakeSemanticScholarClient:
+        async def fetch_search_page_html(self, url: str):
+            return """
+            <div class="cl-pager" data-total-pages="1" data-test-id="result-page-pagination"></div>
+            <a data-test-id="title-link" href="/paper/Fast3R/abc123">
+              <h2 class="cl-paper-title">Fast3R: Towards 3D Reconstruction of 1000+ Images in One Forward Pass</h2>
+            </a>
+            """
+
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+
+        async def get_huggingface_search_html(self, title: str):
+            assert title == "Fast3R: Towards 3D Reconstruction of 1000+ Images in One Forward Pass"
+            return (
+                """
+                <div
+                  data-target="DailyPapers"
+                  data-props="{
+                    &quot;query&quot;:{&quot;q&quot;:&quot;Fast3R: Towards 3D Reconstruction of 1000+ Images in One Forward Pass&quot;},
+                    &quot;searchResults&quot;:[
+                      {
+                        &quot;title&quot;:&quot;Fast3R: Towards 3D Reconstruction of 1000+ Images in One Forward Pass&quot;,
+                        &quot;paper&quot;:{&quot;id&quot;:&quot;2501.13928&quot;,&quot;title&quot;:&quot;Fast3R: Towards 3D Reconstruction of 1000+ Images in One Forward Pass&quot;}
+                      }
+                    ]
+                  }">
+                </div>
+                """,
+                None,
+            )
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("arXiv fallback should not be used when Hugging Face already matched")
+
+    result = await fetch_paper_seeds_from_semanticscholar_url(
+        "https://www.semanticscholar.org/search?q=semantic%203d%20reconstruction&sort=pub-date",
+        semanticscholar_client=FakeSemanticScholarClient(),
+        discovery_client=FakeDiscoveryClient(),
+        arxiv_client=FakeArxivClient(),
+        output_dir=tmp_path,
+    )
+
+    assert [(seed.name, seed.url) for seed in result.seeds] == [
+        ("Fast3R: Towards 3D Reconstruction of 1000+ Images in One Forward Pass", "https://arxiv.org/abs/2501.13928"),
+    ]
