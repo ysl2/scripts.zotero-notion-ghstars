@@ -2,7 +2,7 @@ import csv
 import tempfile
 from pathlib import Path
 
-from shared.papers import PaperRecord, sort_records
+from src.shared.papers import PaperRecord, sort_records
 
 
 CSV_HEADERS = ["Name", "Url", "Github", "Stars"]

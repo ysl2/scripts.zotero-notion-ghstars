@@ -1,10 +1,10 @@
 import asyncio
 from types import SimpleNamespace
 
-from shared.github import extract_owner_repo, is_valid_github_repo_url, normalize_github_url
-from shared.paper_identity import extract_arxiv_id
-from shared.progress import print_item_skip, print_item_success
-from shared.skip_reasons import is_minor_skip_reason
+from src.shared.github import extract_owner_repo, is_valid_github_repo_url, normalize_github_url
+from src.shared.paper_identity import extract_arxiv_id
+from src.shared.progress import print_item_skip, print_item_success
+from src.shared.skip_reasons import is_minor_skip_reason
 
 
 GITHUB_PROPERTY_NAME = "Github"

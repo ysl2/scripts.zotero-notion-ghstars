@@ -1,14 +1,14 @@
 from pathlib import Path
 
-from shared.paper_export import export_paper_seeds_to_csv
-from url_to_csv.arxivxplorer import (
+from src.shared.paper_export import export_paper_seeds_to_csv
+from src.url_to_csv.arxivxplorer import (
     fetch_paper_seeds_from_arxivxplorer_url,
 )
-from url_to_csv.huggingface_papers import (
+from src.url_to_csv.huggingface_papers import (
     fetch_paper_seeds_from_huggingface_papers_url,
 )
-from url_to_csv.models import FetchedSeedsResult
-from url_to_csv.sources import UrlSource, detect_url_source
+from src.url_to_csv.models import FetchedSeedsResult
+from src.url_to_csv.sources import UrlSource, detect_url_source
 
 async def fetch_paper_seeds_from_url(
     input_url: str,

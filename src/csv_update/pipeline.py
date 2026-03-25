@@ -4,8 +4,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.paper_enrichment import enrich_paper
-from shared.papers import PaperRecord
+from src.shared.paper_enrichment import enrich_paper
+from src.shared.papers import PaperRecord
 
 
 NAME_COLUMN = "Name"

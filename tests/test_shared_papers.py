@@ -1,7 +1,7 @@
 import csv
 
-from shared.csv_io import write_records_to_csv_path
-from shared.papers import PaperRecord, sort_records
+from src.shared.csv_io import write_records_to_csv_path
+from src.shared.papers import PaperRecord, sort_records
 
 
 def test_sort_records_orders_newer_arxiv_urls_first():

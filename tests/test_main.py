@@ -1,4 +1,4 @@
-from shared.runtime import load_runtime_config
+from src.shared.runtime import load_runtime_config
 
 
 def test_load_runtime_config_reads_only_optional_tokens():

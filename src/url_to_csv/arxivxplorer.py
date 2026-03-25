@@ -6,10 +6,10 @@ from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
-from shared.http import MAX_RETRIES, RateLimiter
-from shared.paper_identity import normalize_arxiv_url
-from shared.papers import PaperSeed
-from url_to_csv.models import FetchedSeedsResult
+from src.shared.http import MAX_RETRIES, RateLimiter
+from src.shared.paper_identity import normalize_arxiv_url
+from src.shared.papers import PaperSeed
+from src.url_to_csv.models import FetchedSeedsResult
 
 
 ARXIVXPLORER_HOSTS = {"arxivxplorer.com", "www.arxivxplorer.com"}
@@ -151,7 +151,7 @@ class ArxivXplorerSearchClient:
             async with self.semaphore:
                 await self.rate_limiter.acquire()
                 try:
-                    async with self.session.get(url, params=params, headers={"User-Agent": "zotero-notion-ghstars"}) as response:
+                    async with self.session.get(url, params=params, headers={"User-Agent": "ghstars"}) as response:
                         if response.status == 200:
                             payload = await response.json()
                             return payload if isinstance(payload, list) else []

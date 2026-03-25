@@ -1,7 +1,7 @@
-import csv_update.runner as csv_runner
-import notion_sync.runner as notion_runner
-from shared.settings import DEFAULT_CONCURRENT_LIMIT
-import url_to_csv.runner as url_runner
+import src.csv_update.runner as csv_runner
+import src.notion_sync.runner as notion_runner
+import src.url_to_csv.runner as url_runner
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
 
 
 def test_branches_share_same_default_concurrency_limit():

@@ -1,7 +1,7 @@
 from enum import StrEnum
 
-from url_to_csv.arxivxplorer import is_supported_arxivxplorer_url
-from url_to_csv.huggingface_papers import is_supported_huggingface_papers_url
+from src.url_to_csv.arxivxplorer import is_supported_arxivxplorer_url
+from src.url_to_csv.huggingface_papers import is_supported_huggingface_papers_url
 
 
 class UrlSource(StrEnum):

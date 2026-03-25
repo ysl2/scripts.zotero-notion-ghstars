@@ -4,9 +4,9 @@ import re
 
 import aiohttp
 
-from shared.github import normalize_github_url
-from shared.http import MAX_RETRIES, RateLimiter
-from shared.paper_identity import extract_arxiv_id
+from src.shared.github import normalize_github_url
+from src.shared.http import MAX_RETRIES, RateLimiter
+from src.shared.paper_identity import extract_arxiv_id
 
 
 def find_github_url_in_text(text: str) -> str | None:
@@ -145,7 +145,7 @@ class DiscoveryClient:
     async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id: str):
         if not self.huggingface_token:
             return None, "Missing HUGGINGFACE_TOKEN"
-        headers = {"Accept": "text/html,application/json", "User-Agent": "zotero-notion-ghstars", "Authorization": f"Bearer {self.huggingface_token}"}
+        headers = {"Accept": "text/html,application/json", "User-Agent": "ghstars", "Authorization": f"Bearer {self.huggingface_token}"}
         return await self._request(
             f"https://huggingface.co/papers/{arxiv_id}",
             headers=headers,
@@ -156,7 +156,7 @@ class DiscoveryClient:
     async def get_huggingface_search_html(self, title: str):
         if not self.huggingface_token:
             return None, "Missing HUGGINGFACE_TOKEN"
-        headers = {"Accept": "text/html,application/json", "User-Agent": "zotero-notion-ghstars", "Authorization": f"Bearer {self.huggingface_token}"}
+        headers = {"Accept": "text/html,application/json", "User-Agent": "ghstars", "Authorization": f"Bearer {self.huggingface_token}"}
         return await self._request(
             "https://huggingface.co/papers",
             headers=headers,
@@ -168,7 +168,7 @@ class DiscoveryClient:
     async def get_alphaxiv_paper_legacy(self, arxiv_id: str):
         if not self.alphaxiv_token:
             return None, "Missing ALPHAXIV_TOKEN"
-        headers = {"Accept": "application/json", "User-Agent": "zotero-notion-ghstars", "Authorization": f"Bearer {self.alphaxiv_token}"}
+        headers = {"Accept": "application/json", "User-Agent": "ghstars", "Authorization": f"Bearer {self.alphaxiv_token}"}
         return await self._request(
             f"https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}",
             headers=headers,

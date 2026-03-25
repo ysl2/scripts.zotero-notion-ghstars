@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.paper_identity import arxiv_url_sort_key
+from src.shared.paper_identity import arxiv_url_sort_key
 
 
 @dataclass(frozen=True)

@@ -1,10 +1,10 @@
 import asyncio
 from pathlib import Path
 
-from shared.csv_io import write_records_to_csv_path
-from shared.paper_enrichment import enrich_paper
-from shared.papers import ConversionResult, PaperOutcome, PaperRecord, PaperSeed
-from shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.csv_io import write_records_to_csv_path
+from src.shared.paper_enrichment import enrich_paper
+from src.shared.papers import ConversionResult, PaperOutcome, PaperRecord, PaperSeed
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
 
 
 async def build_paper_outcome(

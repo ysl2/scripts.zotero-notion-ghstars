@@ -7,10 +7,10 @@ from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
-from shared.http import MAX_RETRIES, RateLimiter
-from shared.paper_identity import normalize_arxiv_url
-from shared.papers import PaperSeed
-from url_to_csv.models import FetchedSeedsResult
+from src.shared.http import MAX_RETRIES, RateLimiter
+from src.shared.paper_identity import normalize_arxiv_url
+from src.shared.papers import PaperSeed
+from src.url_to_csv.models import FetchedSeedsResult
 
 
 HUGGINGFACE_PAPERS_HOSTS = {"huggingface.co", "www.huggingface.co"}
@@ -96,7 +96,7 @@ class HuggingFacePapersClient:
             async with self.semaphore:
                 await self.rate_limiter.acquire()
                 try:
-                    async with self.session.get(url, headers={"User-Agent": "zotero-notion-ghstars"}) as response:
+                    async with self.session.get(url, headers={"User-Agent": "ghstars"}) as response:
                         if response.status == 200:
                             return await response.text()
                         if response.status in {429, 500, 502, 503, 504} and attempt < MAX_RETRIES:

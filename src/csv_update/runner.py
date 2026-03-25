@@ -4,14 +4,14 @@ from pathlib import Path
 
 import aiohttp
 
-from csv_update.pipeline import update_csv_file
-from shared.discovery import DiscoveryClient
-from shared.github import GitHubClient
-from shared.http import build_timeout
-from shared.progress import print_paper_progress, print_summary
-from shared.runtime import build_client, load_runtime_config
-from shared.settings import DEFAULT_CONCURRENT_LIMIT
-from shared.skip_reasons import is_minor_skip_reason
+from src.csv_update.pipeline import update_csv_file
+from src.shared.discovery import DiscoveryClient
+from src.shared.github import GitHubClient
+from src.shared.http import build_timeout
+from src.shared.progress import print_paper_progress, print_summary
+from src.shared.runtime import build_client, load_runtime_config
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.skip_reasons import is_minor_skip_reason
 
 
 CONCURRENT_LIMIT = DEFAULT_CONCURRENT_LIMIT

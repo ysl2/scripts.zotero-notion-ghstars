@@ -2,12 +2,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from shared.discovery import (
+from src.shared.discovery import (
     find_github_url_in_alphaxiv_legacy_payload,
     find_github_url_in_huggingface_paper_html,
     resolve_github_url,
 )
-from shared.github import extract_owner_repo, normalize_github_url
+from src.shared.github import extract_owner_repo, normalize_github_url
 
 
 @dataclass(frozen=True)

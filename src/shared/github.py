@@ -3,7 +3,7 @@ import re
 
 import aiohttp
 
-from shared.http import MAX_RETRIES, RateLimiter
+from src.shared.http import MAX_RETRIES, RateLimiter
 
 
 def is_valid_github_repo_url(url: str) -> bool:
@@ -46,7 +46,7 @@ class GitHubClient:
         self.rate_limiter = RateLimiter(min_interval)
 
     async def get_star_count(self, owner: str, repo: str) -> tuple[int | None, str | None]:
-        headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "zotero-notion-ghstars"}
+        headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "ghstars"}
         if self.github_token:
             headers["Authorization"] = f"Bearer {self.github_token}"
 

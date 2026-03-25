@@ -1,4 +1,4 @@
-from url_to_csv.sources import UrlSource, detect_url_source, is_supported_url_source
+from src.url_to_csv.sources import UrlSource, detect_url_source, is_supported_url_source
 
 
 def test_detect_url_source_identifies_supported_sites():

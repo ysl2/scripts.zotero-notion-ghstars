@@ -1,4 +1,4 @@
-from shared.arxiv import extract_best_arxiv_id_from_feed, extract_submitted_date_from_abs_html
+from src.shared.arxiv import extract_best_arxiv_id_from_feed, extract_submitted_date_from_abs_html
 
 
 def test_extract_best_arxiv_id_from_feed_prefers_exact_title_match():

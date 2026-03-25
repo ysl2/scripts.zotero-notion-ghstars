@@ -3,16 +3,16 @@ import os
 
 import aiohttp
 
-from notion_sync.config import load_config_from_env
-from notion_sync.notion_client import NotionClient
-from notion_sync.pipeline import process_page
-from shared.arxiv import ArxivClient
-from shared.discovery import DiscoveryClient
-from shared.github import GitHubClient
-from shared.http import build_timeout
-from shared.progress import Colors, colored, print_summary
-from shared.settings import DEFAULT_CONCURRENT_LIMIT
-from shared.skip_reasons import is_minor_skip_reason
+from src.notion_sync.config import load_config_from_env
+from src.notion_sync.notion_client import NotionClient
+from src.notion_sync.pipeline import process_page
+from src.shared.arxiv import ArxivClient
+from src.shared.discovery import DiscoveryClient
+from src.shared.github import GitHubClient
+from src.shared.http import build_timeout
+from src.shared.progress import Colors, colored, print_summary
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.skip_reasons import is_minor_skip_reason
 
 
 CONCURRENT_LIMIT = DEFAULT_CONCURRENT_LIMIT

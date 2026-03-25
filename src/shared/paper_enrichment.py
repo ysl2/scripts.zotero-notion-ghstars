@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from shared.discovery import resolve_github_url
-from shared.github import extract_owner_repo, normalize_github_url
-from shared.paper_identity import normalize_arxiv_url
+from src.shared.discovery import resolve_github_url
+from src.shared.github import extract_owner_repo, normalize_github_url
+from src.shared.paper_identity import normalize_arxiv_url
 
 
 @dataclass(frozen=True)

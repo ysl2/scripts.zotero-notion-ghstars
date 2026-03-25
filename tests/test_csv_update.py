@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from csv_update.pipeline import update_csv_file
-from csv_update.runner import run_csv_mode
+from src.csv_update.pipeline import update_csv_file
+from src.csv_update.runner import run_csv_mode
 
 
 @pytest.mark.anyio

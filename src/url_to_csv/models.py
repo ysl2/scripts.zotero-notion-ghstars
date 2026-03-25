@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.papers import PaperSeed
+from src.shared.papers import PaperSeed
 
 
 @dataclass(frozen=True)

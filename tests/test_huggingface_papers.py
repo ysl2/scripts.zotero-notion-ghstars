@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from url_to_csv.huggingface_papers import (
+from src.url_to_csv.huggingface_papers import (
     extract_paper_seeds_from_huggingface_html,
     fetch_paper_seeds_from_huggingface_papers_url,
     is_supported_huggingface_papers_url,

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from url_to_csv.arxivxplorer import TooManyPagesError, output_csv_path_for_arxivxplorer_url, parse_arxivxplorer_url
-from url_to_csv.pipeline import fetch_paper_seeds_from_url, export_url_to_csv
-from url_to_csv.runner import run_url_mode
+from src.url_to_csv.arxivxplorer import TooManyPagesError, output_csv_path_for_arxivxplorer_url, parse_arxivxplorer_url
+from src.url_to_csv.pipeline import fetch_paper_seeds_from_url, export_url_to_csv
+from src.url_to_csv.runner import run_url_mode
 
 
 def test_parse_arxivxplorer_url_reads_query_categories_and_years():

@@ -4,17 +4,17 @@ from pathlib import Path
 
 import aiohttp
 
-from shared.discovery import DiscoveryClient
-from shared.github import GitHubClient
-from shared.http import build_timeout
-from shared.progress import print_paper_progress, print_summary
-from shared.runtime import build_client, load_runtime_config
-from shared.settings import DEFAULT_CONCURRENT_LIMIT
-from shared.skip_reasons import is_minor_skip_reason
-from url_to_csv.arxivxplorer import ArxivXplorerSearchClient
-from url_to_csv.huggingface_papers import HuggingFacePapersClient
-from url_to_csv.pipeline import export_url_to_csv
-from url_to_csv.sources import is_supported_url_source
+from src.shared.discovery import DiscoveryClient
+from src.shared.github import GitHubClient
+from src.shared.http import build_timeout
+from src.shared.progress import print_paper_progress, print_summary
+from src.shared.runtime import build_client, load_runtime_config
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.skip_reasons import is_minor_skip_reason
+from src.url_to_csv.arxivxplorer import ArxivXplorerSearchClient
+from src.url_to_csv.huggingface_papers import HuggingFacePapersClient
+from src.url_to_csv.pipeline import export_url_to_csv
+from src.url_to_csv.sources import is_supported_url_source
 
 
 CONCURRENT_LIMIT = DEFAULT_CONCURRENT_LIMIT

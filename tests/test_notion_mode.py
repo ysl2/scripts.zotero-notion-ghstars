@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from notion_sync.config import load_config_from_env
-from notion_sync.notion_client import NotionClient
-from notion_sync.pipeline import (
+from src.notion_sync.config import load_config_from_env
+from src.notion_sync.notion_client import NotionClient
+from src.notion_sync.pipeline import (
     classify_github_value,
     get_current_stars_from_page,
     get_github_url_from_page,

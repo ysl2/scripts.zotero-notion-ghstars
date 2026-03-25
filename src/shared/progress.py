@@ -1,4 +1,4 @@
-from shared.github import extract_owner_repo
+from src.shared.github import extract_owner_repo
 
 
 class Colors:

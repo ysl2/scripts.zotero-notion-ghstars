@@ -5,8 +5,8 @@ import xml.etree.ElementTree as ET
 
 import aiohttp
 
-from shared.http import MAX_RETRIES, RateLimiter
-from shared.paper_identity import extract_arxiv_id
+from src.shared.http import MAX_RETRIES, RateLimiter
+from src.shared.paper_identity import extract_arxiv_id
 
 
 ARXIV_SUBMITTED_PATTERN = re.compile(r"\[Submitted on (\d{1,2} [A-Za-z]{3} \d{4})\b", re.IGNORECASE)

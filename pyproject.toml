@@ -1,7 +1,7 @@
 [project]
-name = "zotero.notion-ghstars"
+name = "ghstars"
 version = "0.1.0"
-description = "Sync GitHub repository links and star counts into a Notion paper database"
+description = "Update GitHub links and star counts for papers from Notion, CSV, and URL sources"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
