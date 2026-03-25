@@ -1,4 +1,6 @@
 import csv
+import html
+import json
 from pathlib import Path
 
 import pytest
@@ -92,6 +94,37 @@ async def test_fetch_paper_seeds_from_url_stops_on_too_many_pages_boundary():
 
 
 @pytest.mark.anyio
+async def test_fetch_paper_seeds_from_url_reads_huggingface_collection_payload():
+    payload = {
+        "query": {"q": "semantic"},
+        "searchResults": [
+            {
+                "paper": {"id": "2502.00002", "title": "Search Match"},
+                "title": "Search Match",
+            }
+        ],
+    }
+
+    class FakeHuggingFacePapersClient:
+        async def fetch_collection_html(self, url: str):
+            return (
+                '<div class="SVELTE_HYDRATER contents" '
+                f'data-target="DailyPapers" data-props="{html.escape(json.dumps(payload))}"></div>'
+            )
+
+    messages = []
+    result = await fetch_paper_seeds_from_url(
+        "https://huggingface.co/papers/trending?q=semantic",
+        huggingface_papers_client=FakeHuggingFacePapersClient(),
+        status_callback=messages.append,
+    )
+
+    assert [seed.name for seed in result.seeds] == ["Search Match"]
+    assert [seed.url for seed in result.seeds] == ["https://arxiv.org/abs/2502.00002"]
+    assert any("Fetching Hugging Face Papers collection" in message for message in messages)
+
+
+@pytest.mark.anyio
 async def test_export_url_to_csv_writes_sorted_csv_in_output_dir(tmp_path: Path):
     class FakeSearchClient:
         async def search(self, query, page: int):
@@ -132,6 +165,73 @@ async def test_export_url_to_csv_writes_sorted_csv_in_output_dir(tmp_path: Path)
         rows = list(csv.DictReader(handle))
 
     assert result.csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv"
+    assert rows == [
+        {
+            "Name": "Newer",
+            "Url": "https://arxiv.org/abs/2502.00002",
+            "Github": "https://github.com/foo/new",
+            "Stars": "20",
+        },
+        {
+            "Name": "Older",
+            "Url": "https://arxiv.org/abs/2501.00001",
+            "Github": "https://github.com/foo/old",
+            "Stars": "10",
+        },
+    ]
+
+
+@pytest.mark.anyio
+async def test_export_url_to_csv_writes_huggingface_results_in_output_dir(tmp_path: Path):
+    payload = {
+        "query": {"q": "semantic"},
+        "searchResults": [
+            {
+                "paper": {"id": "2501.00001", "title": "Older"},
+                "title": "Older",
+            },
+            {
+                "paper": {"id": "2502.00002", "title": "Newer"},
+                "title": "Newer",
+            },
+        ],
+    }
+
+    class FakeHuggingFacePapersClient:
+        async def fetch_collection_html(self, url: str):
+            return (
+                '<div class="SVELTE_HYDRATER contents" '
+                f'data-target="DailyPapers" data-props="{html.escape(json.dumps(payload))}"></div>'
+            )
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            mapping = {
+                "https://arxiv.org/abs/2501.00001": "https://github.com/foo/old",
+                "https://arxiv.org/abs/2502.00002": "https://github.com/foo/new",
+            }
+            return mapping[seed.url]
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            mapping = {
+                ("foo", "old"): (10, None),
+                ("foo", "new"): (20, None),
+            }
+            return mapping[(owner, repo)]
+
+    result = await export_url_to_csv(
+        "https://huggingface.co/papers/trending?q=semantic",
+        output_dir=tmp_path,
+        huggingface_papers_client=FakeHuggingFacePapersClient(),
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+    )
+
+    with result.csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert result.csv_path == tmp_path / "huggingface-papers-trending-semantic.csv"
     assert rows == [
         {
             "Name": "Newer",
@@ -203,6 +303,79 @@ async def test_run_url_mode_prints_fetch_and_paper_progress(tmp_path: Path, caps
     assert "Fetching arXiv Xplorer page 1" in captured.out
     assert "Found 1 papers" in captured.out
     assert "Starting concurrent enrichment (10 workers)" in captured.out
+    assert "[1/1] Paper A" in captured.out
+    assert "foo/bar" in captured.out
+    assert "Wrote CSV:" in captured.out
+
+
+@pytest.mark.anyio
+async def test_run_url_mode_supports_huggingface_papers_collection_url(tmp_path: Path, capsys):
+    input_url = "https://huggingface.co/papers/trending?q=semantic"
+    payload = {
+        "query": {"q": "semantic"},
+        "searchResults": [
+            {
+                "paper": {"id": "2501.00001", "title": "Paper A"},
+                "title": "Paper A",
+            }
+        ],
+    }
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSearchClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+        async def search(self, query, page: int):
+            raise AssertionError("arXiv Xplorer client should not be used for Hugging Face URLs")
+
+    class FakeHuggingFacePapersClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+        async def fetch_collection_html(self, url: str):
+            return (
+                '<div class="SVELTE_HYDRATER contents" '
+                f'data-target="DailyPapers" data-props="{html.escape(json.dumps(payload))}"></div>'
+            )
+
+    class FakeDiscoveryClient:
+        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+            self.huggingface_token = huggingface_token
+            self.alphaxiv_token = alphaxiv_token
+
+        async def resolve_github_url(self, seed):
+            return "https://github.com/foo/bar"
+
+    class FakeGitHubClient:
+        def __init__(self, session, github_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+            self.github_token = github_token
+
+        async def get_star_count(self, owner, repo):
+            return 11, None
+
+    exit_code = await run_url_mode(
+        input_url,
+        output_dir=tmp_path,
+        session_factory=lambda **kwargs: FakeSession(),
+        search_client_cls=FakeSearchClient,
+        huggingface_papers_client_cls=FakeHuggingFacePapersClient,
+        discovery_client_cls=FakeDiscoveryClient,
+        github_client_cls=FakeGitHubClient,
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Fetching Hugging Face Papers collection" in captured.out
+    assert "Found 1 papers" in captured.out
     assert "[1/1] Paper A" in captured.out
     assert "foo/bar" in captured.out
     assert "Wrote CSV:" in captured.out

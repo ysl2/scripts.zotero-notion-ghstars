@@ -11,8 +11,10 @@ from shared.progress import print_paper_progress, print_summary
 from shared.runtime import build_client, load_runtime_config
 from shared.settings import DEFAULT_CONCURRENT_LIMIT
 from shared.skip_reasons import is_minor_skip_reason
-from url_to_csv.arxivxplorer import ArxivXplorerSearchClient, is_supported_arxivxplorer_url
+from url_to_csv.arxivxplorer import ArxivXplorerSearchClient
+from url_to_csv.huggingface_papers import HuggingFacePapersClient
 from url_to_csv.pipeline import export_url_to_csv
+from url_to_csv.sources import is_supported_url_source
 
 
 CONCURRENT_LIMIT = DEFAULT_CONCURRENT_LIMIT
@@ -25,10 +27,11 @@ async def run_url_mode(
     output_dir: Path | None = None,
     session_factory=aiohttp.ClientSession,
     search_client_cls=ArxivXplorerSearchClient,
+    huggingface_papers_client_cls=HuggingFacePapersClient,
     discovery_client_cls=DiscoveryClient,
     github_client_cls=GitHubClient,
 ) -> int:
-    if not is_supported_arxivxplorer_url(input_url):
+    if not is_supported_url_source(input_url):
         print(f"Unsupported URL: {input_url}", file=sys.stderr)
         return 1
 
@@ -37,6 +40,12 @@ async def run_url_mode(
     async with session_factory(timeout=build_timeout()) as session:
         search_client = build_client(
             search_client_cls,
+            session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        huggingface_papers_client = build_client(
+            huggingface_papers_client_cls,
             session,
             max_concurrent=CONCURRENT_LIMIT,
             min_interval=REQUEST_DELAY,
@@ -61,6 +70,7 @@ async def run_url_mode(
             input_url,
             output_dir=output_dir,
             search_client=search_client,
+            huggingface_papers_client=huggingface_papers_client,
             discovery_client=discovery_client,
             github_client=github_client,
             status_callback=lambda message: print(message, flush=True),

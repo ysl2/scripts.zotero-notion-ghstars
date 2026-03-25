@@ -2,59 +2,51 @@ from pathlib import Path
 
 from shared.paper_export import export_paper_seeds_to_csv
 from url_to_csv.arxivxplorer import (
-    FetchedSeedsResult,
-    TooManyPagesError,
-    output_csv_path_for_arxivxplorer_url,
-    paper_seed_from_search_result,
-    parse_arxivxplorer_url,
+    fetch_paper_seeds_from_arxivxplorer_url,
 )
-
+from url_to_csv.huggingface_papers import (
+    fetch_paper_seeds_from_huggingface_papers_url,
+)
+from url_to_csv.models import FetchedSeedsResult
+from url_to_csv.sources import UrlSource, detect_url_source
 
 async def fetch_paper_seeds_from_url(
     input_url: str,
     *,
-    search_client,
+    search_client=None,
+    huggingface_papers_client=None,
     output_dir: Path | None = None,
     status_callback=None,
 ) -> FetchedSeedsResult:
-    query = parse_arxivxplorer_url(input_url)
-    csv_path = output_csv_path_for_arxivxplorer_url(input_url, output_dir=output_dir)
+    source = detect_url_source(input_url)
+    if source == UrlSource.ARXIVXPLORER:
+        if search_client is None:
+            raise ValueError("Missing arXiv Xplorer search client")
+        return await fetch_paper_seeds_from_arxivxplorer_url(
+            input_url,
+            search_client=search_client,
+            output_dir=output_dir,
+            status_callback=status_callback,
+        )
 
-    seeds = []
-    seen_urls: set[str] = set()
-    page = 1
-    while True:
-        if callable(status_callback):
-            status_callback(f"🔎 Fetching arXiv Xplorer page {page}")
+    if source == UrlSource.HUGGINGFACE_PAPERS:
+        if huggingface_papers_client is None:
+            raise ValueError("Missing Hugging Face Papers client")
+        return await fetch_paper_seeds_from_huggingface_papers_url(
+            input_url,
+            huggingface_papers_client=huggingface_papers_client,
+            output_dir=output_dir,
+            status_callback=status_callback,
+        )
 
-        try:
-            results = await search_client.search(query, page)
-        except TooManyPagesError:
-            if callable(status_callback):
-                status_callback(f"📄 Reached arXiv Xplorer page limit at page {page - 1}")
-            break
-
-        if callable(status_callback):
-            status_callback(f"📄 Fetched page {page}: {len(results)} results")
-
-        if not results:
-            break
-
-        for result in results:
-            seed = paper_seed_from_search_result(result)
-            if seed and seed.url not in seen_urls:
-                seeds.append(seed)
-                seen_urls.add(seed.url)
-
-        page += 1
-
-    return FetchedSeedsResult(seeds=seeds, csv_path=csv_path)
+    raise ValueError(f"Unsupported URL: {input_url}")
 
 
 async def export_url_to_csv(
     input_url: str,
     *,
-    search_client,
+    search_client=None,
+    huggingface_papers_client=None,
     discovery_client,
     github_client,
     output_dir: Path | None = None,
@@ -64,6 +56,7 @@ async def export_url_to_csv(
     fetched = await fetch_paper_seeds_from_url(
         input_url,
         search_client=search_client,
+        huggingface_papers_client=huggingface_papers_client,
         output_dir=output_dir,
         status_callback=status_callback,
     )

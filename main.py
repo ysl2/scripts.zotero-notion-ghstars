@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from csv_update.runner import run_csv_mode
 from notion_sync.runner import run_notion_mode
 from url_to_csv.runner import run_url_mode
-from url_to_csv.arxivxplorer import is_supported_arxivxplorer_url
+from url_to_csv.sources import is_supported_url_source
 
 
 load_dotenv()
@@ -44,7 +44,7 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     raw_input = args[0]
     if _is_url(raw_input):
-        if not is_supported_arxivxplorer_url(raw_input):
+        if not is_supported_url_source(raw_input):
             print(f"Input file or URL not supported: {raw_input}", file=sys.stderr)
             return 1
         return await run_url_mode(raw_input)

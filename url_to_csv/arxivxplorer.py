@@ -9,6 +9,7 @@ import aiohttp
 from shared.http import MAX_RETRIES, RateLimiter
 from shared.paper_identity import normalize_arxiv_url
 from shared.papers import PaperSeed
+from url_to_csv.models import FetchedSeedsResult
 
 
 ARXIVXPLORER_HOSTS = {"arxivxplorer.com", "www.arxivxplorer.com"}
@@ -20,12 +21,6 @@ class ArxivXplorerQuery:
     search_text: str
     categories: tuple[str, ...]
     years: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class FetchedSeedsResult:
-    seeds: list[PaperSeed]
-    csv_path: Path
 
 
 class TooManyPagesError(ValueError):
@@ -99,6 +94,47 @@ def paper_seed_from_search_result(result: dict) -> PaperSeed | None:
         return None
 
     return PaperSeed(name=title, url=normalized_url)
+
+
+async def fetch_paper_seeds_from_arxivxplorer_url(
+    input_url: str,
+    *,
+    search_client,
+    output_dir: Path | None = None,
+    status_callback=None,
+) -> FetchedSeedsResult:
+    query = parse_arxivxplorer_url(input_url)
+    csv_path = output_csv_path_for_arxivxplorer_url(input_url, output_dir=output_dir)
+
+    seeds = []
+    seen_urls: set[str] = set()
+    page = 1
+    while True:
+        if callable(status_callback):
+            status_callback(f"🔎 Fetching arXiv Xplorer page {page}")
+
+        try:
+            results = await search_client.search(query, page)
+        except TooManyPagesError:
+            if callable(status_callback):
+                status_callback(f"📄 Reached arXiv Xplorer page limit at page {page - 1}")
+            break
+
+        if callable(status_callback):
+            status_callback(f"📄 Fetched page {page}: {len(results)} results")
+
+        if not results:
+            break
+
+        for result in results:
+            seed = paper_seed_from_search_result(result)
+            if seed and seed.url not in seen_urls:
+                seeds.append(seed)
+                seen_urls.add(seed.url)
+
+        page += 1
+
+    return FetchedSeedsResult(seeds=seeds, csv_path=csv_path)
 
 
 class ArxivXplorerSearchClient:

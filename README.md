@@ -4,7 +4,7 @@ One CLI, three modes:
 
 - No positional argument: sync GitHub links and star counts into Notion
 - One existing `.csv` file path: update that CSV in place
-- One supported `https://arxivxplorer.com/?...` URL: fetch the full search result set and write a CSV in the current working directory
+- One supported papers collection URL: fetch the full result set and write a CSV in the current working directory
 
 The CSV and URL modes keep the existing repository discovery policy:
 
@@ -64,23 +64,37 @@ CSV mode behavior:
 - missing `Github` or `Stars` columns are appended automatically
 - writes use a temp file and atomic replace
 
-### Arxivxplorer URL to CSV mode
+### Collection URL to CSV mode
 
-Reads a supported `arxivxplorer.com` search URL, fetches all paginated results from the backing search API, and writes a CSV in the current working directory.
+Reads a supported collection URL and writes a CSV in the current working directory.
+
+Currently supported sources:
+
+- `https://arxivxplorer.com/?...`
+- `https://huggingface.co/papers/trending`
+- `https://huggingface.co/papers/trending?q=...`
+- `https://huggingface.co/papers/month/YYYY-MM`
+- `https://huggingface.co/papers/month/YYYY-MM?q=...`
 
 ```bash
 uv run main.py 'https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026&year=2025&year=2024'
 ```
 
+```bash
+uv run main.py 'https://huggingface.co/papers/trending?q=semantic'
+```
+
 Output example:
 
 - `./arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv`
+- `./huggingface-papers-trending-semantic.csv`
 
 URL mode behavior:
 
-- uses the site’s paging API instead of trying to click `Show More` in a browser
-- keeps fetching pages until the API returns an empty page, so it is not limited by the frontend button behavior
-- only arXiv search results are converted into papers for downstream Github/Stars enrichment
+- source-specific fetching is kept in separate adapters under `url_to_csv/`
+- arXiv Xplorer uses the site’s paging API instead of trying to click `Show More` in a browser
+- Hugging Face Papers parses the collection page’s embedded papers payload from the frontend response
+- only arXiv papers are converted into downstream rows
 - downstream repository discovery, star lookup, sorting, progress printing, and CSV writing reuse the same shared export logic as CSV update mode where applicable
 
 ## Notion expectations
