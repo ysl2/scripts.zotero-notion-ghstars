@@ -4,7 +4,7 @@ One CLI, three modes:
 
 - No positional argument: sync GitHub links and star counts into Notion
 - One existing `.csv` file path: update that CSV in place
-- One supported papers collection URL: fetch the full result set and write a CSV in the current working directory
+- One supported papers collection URL: fetch the full result set and write a CSV under `./output`
 
 The CSV and URL modes keep the existing repository discovery policy:
 
@@ -66,7 +66,7 @@ CSV mode behavior:
 
 ### Collection URL to CSV mode
 
-Reads a supported collection URL and writes a CSV in the current working directory.
+Reads a supported collection URL and writes a CSV under `./output` by default.
 
 Command shape:
 
@@ -74,20 +74,35 @@ Command shape:
 uv run main.py '<collection-url>'
 ```
 
-Currently supported sources:
+Representative supported URL shapes:
 
-- `https://arxivxplorer.com/?...`
-- `https://arxiv.org/list/<category>/recent`
-- `https://arxiv.org/list/<category>/new`
-- `https://arxiv.org/list/<category>/YYYY-MM`
-- `https://arxiv.org/catchup/<category>/YYYY-MM-DD`
-- `https://arxiv.org/search/?...`
-- `https://arxiv.org/search/advanced?...`
-- `https://huggingface.co/papers/trending`
-- `https://huggingface.co/papers/trending?q=...`
-- `https://huggingface.co/papers/month/YYYY-MM`
-- `https://huggingface.co/papers/month/YYYY-MM?q=...`
-- `https://www.semanticscholar.org/search?...`
+- arXiv Xplorer:
+  `https://arxivxplorer.com/?q=...`
+  optional repeated `cats=...` and `year=...`
+- arXiv.org list pages:
+  `https://arxiv.org/list/<category>/recent`
+  `https://arxiv.org/list/<category>/new`
+  `https://arxiv.org/list/<category>/YYYY-MM`
+  optional paging parameter such as `?show=1000`
+- arXiv.org catchup pages:
+  `https://arxiv.org/catchup/<category>/YYYY-MM-DD`
+- arXiv.org search pages:
+  `https://arxiv.org/search/?...`
+  `https://arxiv.org/search/advanced?...`
+- Hugging Face Papers collections:
+  `https://huggingface.co/papers/trending`
+  `https://huggingface.co/papers/trending?q=...`
+  `https://huggingface.co/papers/month/YYYY-MM`
+  `https://huggingface.co/papers/month/YYYY-MM?q=...`
+- Semantic Scholar search pages:
+  `https://www.semanticscholar.org/search?q=...`
+  optional indexed filters such as `year[0]=...`, `fos[0]=...`, `venue[0]=...`, plus `sort=...`
+
+Source-specific notes:
+
+- arXiv Xplorer requires a non-empty `q` parameter
+- Semantic Scholar requires a non-empty `q` parameter
+- the CLI examples below are representative, not an exhaustive list of every supported query-parameter combination
 
 Common arXiv.org examples:
 
@@ -110,9 +125,16 @@ Not supported:
 
 - single paper pages such as `https://arxiv.org/abs/2603.23502`
 - malformed catchup paths such as `https://arxiv.org/catchup/cs.CV/2026/03/26`
+- Hugging Face single paper pages such as `https://huggingface.co/papers/2501.12345`
+- non-search Semantic Scholar pages such as `https://www.semanticscholar.org/paper/Foo/123`
+- arXiv Xplorer URLs without a non-empty `q`
 
 ```bash
 uv run main.py 'https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026&year=2025&year=2024'
+```
+
+```bash
+uv run main.py 'https://huggingface.co/papers/trending'
 ```
 
 ```bash
@@ -121,6 +143,10 @@ uv run main.py 'https://huggingface.co/papers/trending?q=semantic'
 
 ```bash
 uv run main.py 'https://arxiv.org/list/cs.CV/recent'
+```
+
+```bash
+uv run main.py 'https://arxiv.org/list/cs.CV/new'
 ```
 
 ```bash
@@ -140,24 +166,32 @@ uv run main.py 'https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND
 ```
 
 ```bash
+uv run main.py 'https://huggingface.co/papers/month/2026-03?q=semantic'
+```
+
+```bash
 uv run main.py 'https://www.semanticscholar.org/search?year%5B0%5D=2025&year%5B1%5D=2026&fos%5B0%5D=computer-science&venue%5B0%5D=Computer%20Vision%20and%20Pattern%20Recognition&q=semantic%203d%20reconstruction&sort=pub-date'
 ```
 
 Output example:
 
-- `./arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024-20260326113045.csv`
-- `./arxiv-cs.CV-recent-20260326113045.csv`
-- `./arxiv-cs.CV-2026-03-20260326113045.csv`
-- `./arxiv-cs.CV-catchup-2026-03-26-20260326113045.csv`
-- `./arxiv-search-reconstruction-all-submitted-date-20260326113045.csv`
-- `./huggingface-papers-trending-semantic-20260326113045.csv`
-- `./semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition-20260326113045.csv`
+- `./output/arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024-20260326113045.csv`
+- `./output/arxiv-cs.CV-recent-20260326113045.csv`
+- `./output/arxiv-cs.CV-new-20260326113045.csv`
+- `./output/arxiv-cs.CV-2026-03-20260326113045.csv`
+- `./output/arxiv-cs.CV-catchup-2026-03-26-20260326113045.csv`
+- `./output/arxiv-search-reconstruction-all-submitted-date-20260326113045.csv`
+- `./output/arxiv-search-reconstruction-semantic-streaming-all-submitted-date-20260326113045.csv`
+- `./output/huggingface-papers-trending-semantic-20260326113045.csv`
+- `./output/huggingface-papers-month-2026-03-semantic-20260326113045.csv`
+- `./output/semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition-20260326113045.csv`
 
 URL mode behavior:
 
 - source-specific fetching is kept in separate adapters under `url_to_csv/`
 - every URL export appends a run timestamp in `YYYYMMDDHHMMSS` form before `.csv`
-- standard arXiv `list/...` and `search/...` collection pages are crawled across all pages, not just the first page
+- CLI URL exports default to `./output` and create that directory automatically if needed
+- standard arXiv `list/...` and `search/...` collection pages, including `/search/advanced`, are crawled across all pages, not just the first page
 - archive-style arXiv `list/<category>/YYYY-MM` pages reuse the same multi-page `list/...` crawling path
 - arXiv `new` pages include all visible sections, including new submissions, cross-lists, and replacements
 - arXiv `catchup/<category>/YYYY-MM-DD` is supported only for that exact path shape
