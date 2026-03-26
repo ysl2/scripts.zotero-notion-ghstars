@@ -85,6 +85,44 @@ async def test_async_main_runs_url_mode_when_given_supported_arxivxplorer_url(mo
 
 
 @pytest.mark.anyio
+async def test_async_main_runs_url_mode_when_given_supported_arxiv_list_url(monkeypatch):
+    input_url = "https://arxiv.org/list/cs.CV/recent"
+
+    notion_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(app, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(app, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(app, "run_url_mode", url_runner, raising=False)
+
+    exit_code = await app.async_main([input_url])
+
+    assert exit_code == 0
+    notion_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_awaited_once_with(input_url)
+
+
+@pytest.mark.anyio
+async def test_async_main_runs_url_mode_when_given_supported_arxiv_search_url(monkeypatch):
+    input_url = "https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=50&order=-submitted_date"
+
+    notion_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(app, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(app, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(app, "run_url_mode", url_runner, raising=False)
+
+    exit_code = await app.async_main([input_url])
+
+    assert exit_code == 0
+    notion_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_awaited_once_with(input_url)
+
+
+@pytest.mark.anyio
 async def test_async_main_runs_url_mode_when_given_supported_huggingface_papers_url(monkeypatch):
     input_url = "https://huggingface.co/papers/trending?q=semantic"
 

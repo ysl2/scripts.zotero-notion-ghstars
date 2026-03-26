@@ -3,6 +3,14 @@ from src.url_to_csv.sources import UrlSource, detect_url_source, is_supported_ur
 
 def test_detect_url_source_identifies_supported_sites():
     assert detect_url_source("https://arxivxplorer.com/?q=test&cats=cs.CV") == UrlSource.ARXIVXPLORER
+    assert detect_url_source("https://arxiv.org/list/cs.CV/recent") == UrlSource.ARXIV_ORG
+    assert detect_url_source("https://arxiv.org/list/cs.CV/new") == UrlSource.ARXIV_ORG
+    assert (
+        detect_url_source(
+            "https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=50&order=-submitted_date"
+        )
+        == UrlSource.ARXIV_ORG
+    )
     assert detect_url_source("https://huggingface.co/papers/trending?q=semantic") == UrlSource.HUGGINGFACE_PAPERS
     assert (
         detect_url_source(
@@ -13,5 +21,7 @@ def test_detect_url_source_identifies_supported_sites():
 
 
 def test_detect_url_source_returns_none_for_unsupported_url():
+    assert detect_url_source("https://arxiv.org/abs/2603.23502") is None
     assert detect_url_source("https://example.com/search?q=test") is None
+    assert not is_supported_url_source("https://arxiv.org/abs/2603.23502")
     assert not is_supported_url_source("https://example.com/search?q=test")
