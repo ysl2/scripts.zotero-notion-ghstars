@@ -161,6 +161,31 @@ async def test_async_main_runs_url_mode_when_given_supported_arxiv_search_url(mo
 
 
 @pytest.mark.anyio
+async def test_async_main_runs_url_mode_when_given_supported_arxiv_advanced_search_url(monkeypatch):
+    input_url = (
+        "https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=reconstruction"
+        "&terms-0-field=all&terms-1-operator=AND&terms-1-term=semantic&terms-1-field=all"
+        "&terms-2-operator=AND&terms-2-term=streaming&terms-2-field=all"
+        "&classification-computer_science=y&classification-include_cross_list=include"
+        "&date-filter_by=past_12&date-date_type=submitted_date&abstracts=hide&size=50&order=-submitted_date"
+    )
+
+    notion_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(app, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(app, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(app, "run_url_mode", url_runner, raising=False)
+
+    exit_code = await app.async_main([input_url])
+
+    assert exit_code == 0
+    notion_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_awaited_once_with(input_url)
+
+
+@pytest.mark.anyio
 async def test_async_main_runs_url_mode_when_given_supported_huggingface_papers_url(monkeypatch):
     input_url = "https://huggingface.co/papers/trending?q=semantic"
 

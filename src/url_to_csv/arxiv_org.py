@@ -41,6 +41,7 @@ SEARCH_TOTAL_PATTERN = re.compile(
     r"Showing\s+\d+\s*(?:&ndash;|&#8211;|–|-)\s*\d+\s+of\s+([\d,]+)\s+results",
     re.IGNORECASE,
 )
+ADVANCED_TERM_KEY_PATTERN = re.compile(r"terms-(\d+)-term$")
 
 
 def is_supported_arxiv_org_url(raw_url: str) -> bool:
@@ -60,7 +61,7 @@ def is_supported_arxiv_org_url(raw_url: str) -> bool:
         if len(parts) == 3 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[2]):
             return True
 
-    return path == "/search"
+    return path in {"/search", "/search/advanced"}
 
 
 def output_csv_path_for_arxiv_org_url(raw_url: str, *, output_dir: Path | None = None) -> Path:
@@ -81,9 +82,12 @@ def output_csv_path_for_arxiv_org_url(raw_url: str, *, output_dir: Path | None =
             date_part = _sanitize_filename_part(parts[2])
             return build_url_export_csv_path(["arxiv", category, "catchup", date_part], output_dir=output_dir)
 
-    if path == "/search":
+    if path in {"/search", "/search/advanced"}:
         query = parse_qs(parsed.query, keep_blank_values=False)
-        search_text = _slugify(query.get("query", [""])[0] or "search")
+        if path == "/search/advanced":
+            search_text = _slugify(" ".join(_extract_advanced_search_terms(query)) or "search")
+        else:
+            search_text = _slugify(query.get("query", [""])[0] or "search")
         search_type = _sanitize_filename_part((query.get("searchtype", ["all"])[0] or "all").strip()) or "all"
         order = ((query.get("order", [""])[0] or "").strip().lstrip("-").replace("_", "-")) or "relevance"
         return build_url_export_csv_path(
@@ -170,7 +174,7 @@ async def fetch_paper_seeds_from_arxiv_org_url(
         )
         return FetchedSeedsResult(seeds=seeds, csv_path=csv_path)
 
-    if path == "/search":
+    if path in {"/search", "/search/advanced"}:
         seeds = await _fetch_search_seeds(
             input_url,
             arxiv_org_client=arxiv_org_client,
@@ -380,8 +384,8 @@ def build_arxiv_list_page_url(raw_url: str, *, skip: int, show: int) -> str:
 
 def build_arxiv_search_page_url(raw_url: str, *, start: int) -> str:
     parsed = urlparse(raw_url)
-    params = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=False) if key != "start"]
-    if start <= 0 and not any(key == "start" for key, _value in parse_qsl(parsed.query, keep_blank_values=False)):
+    params = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key != "start"]
+    if start <= 0 and not any(key == "start" for key, _value in parse_qsl(parsed.query, keep_blank_values=True)):
         return raw_url
     if start > 0:
         params.append(("start", str(start)))
@@ -474,3 +478,18 @@ def _slugify(value: str) -> str:
 
 def _sanitize_filename_part(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-")
+
+
+def _extract_advanced_search_terms(query: dict[str, list[str]]) -> list[str]:
+    indexed_terms: list[tuple[int, str]] = []
+    for key, values in query.items():
+        match = ADVANCED_TERM_KEY_PATTERN.fullmatch(key)
+        if not match or not values:
+            continue
+        term = (values[0] or "").strip()
+        if not term:
+            continue
+        indexed_terms.append((int(match.group(1)), term))
+
+    indexed_terms.sort(key=lambda item: item[0])
+    return [term for _index, term in indexed_terms]

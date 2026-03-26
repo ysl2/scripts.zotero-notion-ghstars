@@ -11,6 +11,12 @@ def test_detect_url_source_identifies_supported_sites():
         )
         == UrlSource.ARXIV_ORG
     )
+    assert (
+        detect_url_source(
+            "https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=reconstruction&terms-0-field=all&terms-1-operator=AND&terms-1-term=semantic&terms-1-field=all&terms-2-operator=AND&terms-2-term=streaming&terms-2-field=all&classification-computer_science=y&classification-include_cross_list=include&date-filter_by=past_12&date-date_type=submitted_date&abstracts=hide&size=50&order=-submitted_date"
+        )
+        == UrlSource.ARXIV_ORG
+    )
     assert detect_url_source("https://arxiv.org/catchup/cs.CV/2026-03-26") == UrlSource.ARXIV_ORG
     assert detect_url_source("https://arxiv.org/list/cs.CV/2026-03") == UrlSource.ARXIV_ORG
     assert detect_url_source("https://huggingface.co/papers/trending?q=semantic") == UrlSource.HUGGINGFACE_PAPERS

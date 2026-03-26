@@ -82,6 +82,7 @@ Currently supported sources:
 - `https://arxiv.org/list/<category>/YYYY-MM`
 - `https://arxiv.org/catchup/<category>/YYYY-MM-DD`
 - `https://arxiv.org/search/?...`
+- `https://arxiv.org/search/advanced?...`
 - `https://huggingface.co/papers/trending`
 - `https://huggingface.co/papers/trending?q=...`
 - `https://huggingface.co/papers/month/YYYY-MM`
@@ -102,6 +103,8 @@ Common arXiv.org examples:
   `https://arxiv.org/catchup/cs.CV/2026-03-26`
 - search results page:
   `https://arxiv.org/search/?query=streaming+semantic+3d+reconstruction&searchtype=all&abstracts=show&order=-submitted_date&size=200`
+- advanced search results page:
+  `https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=reconstruction&terms-0-field=all&terms-1-operator=AND&terms-1-term=semantic&terms-1-field=all&terms-2-operator=AND&terms-2-term=streaming&terms-2-field=all&classification-computer_science=y&classification-include_cross_list=include&date-filter_by=past_12&date-date_type=submitted_date&abstracts=hide&size=200&order=-submitted_date`
 
 Not supported:
 
@@ -130,6 +133,10 @@ uv run main.py 'https://arxiv.org/catchup/cs.CV/2026-03-26'
 
 ```bash
 uv run main.py 'https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=50&order=-submitted_date'
+```
+
+```bash
+uv run main.py 'https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=reconstruction&terms-0-field=all&terms-1-operator=AND&terms-1-term=semantic&terms-1-field=all&terms-2-operator=AND&terms-2-term=streaming&terms-2-field=all&classification-computer_science=y&classification-include_cross_list=include&date-filter_by=past_12&date-date_type=submitted_date&abstracts=hide&size=200&order=-submitted_date'
 ```
 
 ```bash
