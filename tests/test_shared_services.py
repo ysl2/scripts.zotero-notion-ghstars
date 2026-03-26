@@ -156,8 +156,43 @@ async def test_resolve_github_url_falls_back_from_huggingface_to_alphaxiv():
     assert github_url == "https://github.com/foo/bar"
     assert client.calls == [
         ("hf_paper", "2603.18493"),
-        ("hf_search", "Paper Title"),
         ("alphaxiv", "2603.18493"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_resolve_github_url_keeps_huggingface_title_search_when_direct_paper_page_request_fails():
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+            self.alphaxiv_token = "ax_token"
+            self.calls = []
+
+        async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id):
+            self.calls.append(("hf_paper", arxiv_id))
+            if self.calls == [("hf_paper", "2603.18493")]:
+                return None, "Hugging Face Papers timeout"
+            return '<script>window.__DATA__={"githubRepo":"https://github.com/foo/bar"}</script>', None
+
+        async def get_huggingface_search_html(self, title):
+            self.calls.append(("hf_search", title))
+            return '<a href="/papers/2603.18493">Paper Title</a>', None
+
+        async def get_alphaxiv_paper_legacy(self, arxiv_id):
+            self.calls.append(("alphaxiv", arxiv_id))
+            raise AssertionError("AlphaXiv fallback should not be used when Hugging Face retry succeeds")
+
+    client = FakeDiscoveryClient()
+    github_url = await resolve_github_url(
+        FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
+        client,
+    )
+
+    assert github_url == "https://github.com/foo/bar"
+    assert client.calls == [
+        ("hf_paper", "2603.18493"),
+        ("hf_search", "Paper Title"),
+        ("hf_paper", "2603.18493"),
     ]
 
 
@@ -313,6 +348,5 @@ async def test_resolve_github_url_does_not_refetch_same_huggingface_page_after_s
     assert github_url == "https://github.com/foo/bar"
     assert client.calls == [
         ("hf_paper", "2603.18493"),
-        ("hf_search", "Paper Title"),
         ("alphaxiv", "2603.18493"),
     ]
