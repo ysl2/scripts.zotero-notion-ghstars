@@ -71,6 +71,9 @@ Reads a supported collection URL and writes a CSV in the current working directo
 Currently supported sources:
 
 - `https://arxivxplorer.com/?...`
+- `https://arxiv.org/list/<category>/recent`
+- `https://arxiv.org/list/<category>/new`
+- `https://arxiv.org/search/?...`
 - `https://huggingface.co/papers/trending`
 - `https://huggingface.co/papers/trending?q=...`
 - `https://huggingface.co/papers/month/YYYY-MM`
@@ -86,18 +89,30 @@ uv run main.py 'https://huggingface.co/papers/trending?q=semantic'
 ```
 
 ```bash
+uv run main.py 'https://arxiv.org/list/cs.CV/recent'
+```
+
+```bash
+uv run main.py 'https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=50&order=-submitted_date'
+```
+
+```bash
 uv run main.py 'https://www.semanticscholar.org/search?year%5B0%5D=2025&year%5B1%5D=2026&fos%5B0%5D=computer-science&venue%5B0%5D=Computer%20Vision%20and%20Pattern%20Recognition&q=semantic%203d%20reconstruction&sort=pub-date'
 ```
 
 Output example:
 
 - `./arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv`
+- `./arxiv-cs.CV-recent.csv`
+- `./arxiv-search-reconstruction-all-submitted-date.csv`
 - `./huggingface-papers-trending-semantic.csv`
 - `./semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition.csv`
 
 URL mode behavior:
 
 - source-specific fetching is kept in separate adapters under `url_to_csv/`
+- standard arXiv `list/...` and `search/...` collection pages are crawled across all pages, not just the first page
+- arXiv `new` pages include all visible sections, including new submissions, cross-lists, and replacements
 - arXiv Xplorer uses the site’s paging API instead of trying to click `Show More` in a browser
 - Hugging Face Papers parses the collection page’s embedded papers payload from the frontend response
 - Semantic Scholar crawls the search result pages, then keeps only rows that can be normalized to canonical arXiv URLs
