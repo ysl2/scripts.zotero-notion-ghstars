@@ -10,6 +10,7 @@ from src.shared.discovery import (
     resolve_arxiv_id_by_title,
     resolve_github_url,
 )
+from src.shared.http import RateLimiter
 from src.shared.github import GitHubClient, extract_owner_repo, normalize_github_url
 
 
@@ -249,3 +250,69 @@ async def test_github_client_caches_concurrent_star_lookup_for_same_repo():
     assert first == (123, None)
     assert second == (123, None)
     assert session.calls == ["https://api.github.com/repos/foo/bar"]
+
+
+@pytest.mark.anyio
+async def test_rate_limiter_allows_multiple_waiters_to_sleep_without_holding_lock(monkeypatch):
+    limiter = RateLimiter(min_interval=0.5)
+    loop = asyncio.get_running_loop()
+    limiter.last_request_time = loop.time()
+    real_sleep = asyncio.sleep
+
+    entered_sleeps = []
+    release_sleep = asyncio.Event()
+
+    async def fake_sleep(delay):
+        entered_sleeps.append(delay)
+        await release_sleep.wait()
+
+    monkeypatch.setattr("src.shared.http.asyncio.sleep", fake_sleep)
+
+    first = asyncio.create_task(limiter.acquire())
+    second = asyncio.create_task(limiter.acquire())
+    await real_sleep(0)
+    await real_sleep(0)
+
+    assert len(entered_sleeps) == 2
+
+    release_sleep.set()
+    await asyncio.gather(first, second)
+
+
+@pytest.mark.anyio
+async def test_resolve_github_url_does_not_refetch_same_huggingface_page_after_successful_no_repo_result():
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+            self.alphaxiv_token = "ax_token"
+            self.calls = []
+
+        async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id):
+            self.calls.append(("hf_paper", arxiv_id))
+            return "<html><body>No repo here</body></html>", None
+
+        async def get_huggingface_search_html(self, title):
+            self.calls.append(("hf_search", title))
+            return (
+                """
+                <a href="/papers/2603.18493">Paper Title</a>
+                """,
+                None,
+            )
+
+        async def get_alphaxiv_paper_legacy(self, arxiv_id):
+            self.calls.append(("alphaxiv", arxiv_id))
+            return {"paper": {"implementation": "https://github.com/foo/bar"}}, None
+
+    client = FakeDiscoveryClient()
+    github_url = await resolve_github_url(
+        FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
+        client,
+    )
+
+    assert github_url == "https://github.com/foo/bar"
+    assert client.calls == [
+        ("hf_paper", "2603.18493"),
+        ("hf_search", "Paper Title"),
+        ("alphaxiv", "2603.18493"),
+    ]

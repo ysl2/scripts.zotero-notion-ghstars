@@ -17,12 +17,15 @@ class RateLimiter:
         self.lock = asyncio.Lock()
 
     async def acquire(self) -> None:
+        loop = asyncio.get_event_loop()
         async with self.lock:
-            now = asyncio.get_event_loop().time()
-            delta = now - self.last_request_time
-            if delta < self.min_interval:
-                await asyncio.sleep(self.min_interval - delta)
-            self.last_request_time = asyncio.get_event_loop().time()
+            now = loop.time()
+            wait_until = max(now, self.last_request_time + self.min_interval)
+            self.last_request_time = wait_until
+
+        delay = wait_until - now
+        if delay > 0:
+            await asyncio.sleep(delay)
 
 
 def build_timeout() -> aiohttp.ClientTimeout:

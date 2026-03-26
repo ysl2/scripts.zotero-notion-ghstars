@@ -352,11 +352,12 @@ async def resolve_github_url(seed, client) -> str | None:
             github_url = find_github_url_in_huggingface_paper_html(html)
             if github_url:
                 return github_url
+        direct_page_failed = bool(error)
 
         search_html, search_error = await client.get_huggingface_search_html(getattr(seed, "name", ""))
         if not search_error:
             paper_id = find_huggingface_paper_id_in_search_html(search_html)
-            if paper_id and paper_id == arxiv_id:
+            if paper_id and paper_id == arxiv_id and direct_page_failed:
                 html, page_error = await client.get_huggingface_paper_html_by_arxiv_id(paper_id)
                 if not page_error:
                     github_url = find_github_url_in_huggingface_paper_html(html)
