@@ -6,11 +6,14 @@ import aiohttp
 from src.shared.http import MAX_RETRIES, RateLimiter
 
 
+GITHUB_UNAUTHENTICATED_MIN_INTERVAL = 60.0
+
+
 def is_valid_github_repo_url(url: str) -> bool:
     if not url or not isinstance(url, str):
         return False
 
-    pattern = r"^(https?://)?(www\.)?github\.com/[\w.-]+/[\w.-]+/?(.git)?$"
+    pattern = r"^(https?://)?(www\.)?github\.com/[\w.-]+/[\w.-]+(?:\.git)?/?$"
     return bool(re.match(pattern, url.strip(), re.IGNORECASE))
 
 
@@ -36,6 +39,12 @@ def normalize_github_url(url: str) -> str | None:
     return f"https://github.com/{owner}/{repo}"
 
 
+def resolve_github_min_interval(github_token: str, requested_min_interval: float) -> float:
+    if github_token.strip():
+        return requested_min_interval
+    return max(requested_min_interval, GITHUB_UNAUTHENTICATED_MIN_INTERVAL)
+
+
 class GitHubClient:
     """GitHub API client for stars lookup."""
 
@@ -43,7 +52,7 @@ class GitHubClient:
         self.session = session
         self.github_token = github_token
         self.semaphore = asyncio.Semaphore(max_concurrent)
-        self.rate_limiter = RateLimiter(min_interval)
+        self.rate_limiter = RateLimiter(resolve_github_min_interval(github_token, min_interval))
         self._star_cache: dict[tuple[str, str], tuple[int | None, str | None]] = {}
         self._star_tasks: dict[tuple[str, str], asyncio.Task[tuple[int | None, str | None]]] = {}
         self._star_cache_lock = asyncio.Lock()

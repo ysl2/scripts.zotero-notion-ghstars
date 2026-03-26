@@ -8,7 +8,7 @@ from src.notion_sync.notion_client import NotionClient
 from src.notion_sync.pipeline import process_page
 from src.shared.arxiv import ArxivClient
 from src.shared.discovery import DiscoveryClient
-from src.shared.github import GitHubClient
+from src.shared.github import GitHubClient, resolve_github_min_interval
 from src.shared.http import build_timeout
 from src.shared.progress import Colors, colored, print_summary
 from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
@@ -34,6 +34,7 @@ async def run_notion_mode(
     config = load_config_from_env(dict(os.environ))
 
     github_token = config["github_token"]
+    github_request_delay = resolve_github_min_interval(github_token, REQUEST_DELAY)
     if github_token:
         print(colored("✅ GitHub Token configured (5000 requests/hour)", Colors.GREEN))
     else:
@@ -41,7 +42,7 @@ async def run_notion_mode(
         print("   Set GITHUB_TOKEN environment variable for higher rate limit")
 
     print(f"⚙️ Concurrency: GitHub={GITHUB_CONCURRENT_LIMIT}, Notion={NOTION_CONCURRENT_LIMIT}")
-    print(f"⚙️ Request interval: {REQUEST_DELAY}s")
+    print(f"⚙️ Request interval: general={REQUEST_DELAY}s, GitHub={github_request_delay}s")
     print()
 
     async with session_factory(timeout=build_timeout()) as session:
@@ -61,7 +62,7 @@ async def run_notion_mode(
             session,
             github_token=github_token,
             max_concurrent=GITHUB_CONCURRENT_LIMIT,
-            min_interval=REQUEST_DELAY,
+            min_interval=github_request_delay,
         )
 
         async with notion_client_cls(config["notion_token"], NOTION_CONCURRENT_LIMIT) as notion_client:

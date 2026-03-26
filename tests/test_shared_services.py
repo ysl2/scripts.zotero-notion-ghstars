@@ -24,8 +24,24 @@ def test_normalize_github_url_returns_canonical_repo_url():
     assert normalize_github_url(" https://github.com/foo/bar.git ") == "https://github.com/foo/bar"
 
 
+def test_normalize_github_url_rejects_non_repo_urls_with_extra_suffix_segments():
+    assert normalize_github_url("https://github.com/foo/bar/xgit") is None
+
+
 def test_extract_owner_repo_reads_owner_and_repo():
     assert extract_owner_repo("https://github.com/foo/bar") == ("foo", "bar")
+
+
+def test_github_client_enforces_unauthenticated_rate_limit_floor():
+    client = GitHubClient(session=object(), github_token="", min_interval=0.2)
+
+    assert client.rate_limiter.min_interval == 60.0
+
+
+def test_github_client_keeps_requested_rate_limit_when_token_is_configured():
+    client = GitHubClient(session=object(), github_token="ghp_xxx", min_interval=0.2)
+
+    assert client.rate_limiter.min_interval == 0.2
 
 
 def test_find_github_url_in_huggingface_paper_html_prefers_embedded_repo_field():
@@ -182,6 +198,62 @@ async def test_resolve_github_url_keeps_huggingface_title_search_when_direct_pap
         async def get_alphaxiv_paper_legacy(self, arxiv_id):
             self.calls.append(("alphaxiv", arxiv_id))
             raise AssertionError("AlphaXiv fallback should not be used when Hugging Face retry succeeds")
+
+    client = FakeDiscoveryClient()
+    github_url = await resolve_github_url(
+        FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
+        client,
+    )
+
+    assert github_url == "https://github.com/foo/bar"
+    assert client.calls == [
+        ("hf_paper", "2603.18493"),
+        ("hf_search", "Paper Title"),
+        ("hf_paper", "2603.18493"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_resolve_github_url_uses_title_matched_huggingface_search_result_instead_of_first_search_hit():
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+            self.alphaxiv_token = "ax_token"
+            self.calls = []
+
+        async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id):
+            self.calls.append(("hf_paper", arxiv_id))
+            if self.calls == [("hf_paper", "2603.18493")]:
+                return None, "Hugging Face Papers timeout"
+            return '<script>window.__DATA__={"githubRepo":"https://github.com/foo/bar"}</script>', None
+
+        async def get_huggingface_search_html(self, title):
+            self.calls.append(("hf_search", title))
+            return (
+                """
+                <div
+                  data-target="DailyPapers"
+                  data-props="{
+                    &quot;query&quot;:{&quot;q&quot;:&quot;Paper Title&quot;},
+                    &quot;searchResults&quot;:[
+                      {
+                        &quot;title&quot;:&quot;Different Paper&quot;,
+                        &quot;paper&quot;:{&quot;id&quot;:&quot;2603.99999&quot;,&quot;title&quot;:&quot;Different Paper&quot;}
+                      },
+                      {
+                        &quot;title&quot;:&quot;Paper Title&quot;,
+                        &quot;paper&quot;:{&quot;id&quot;:&quot;2603.18493&quot;,&quot;title&quot;:&quot;Paper Title&quot;}
+                      }
+                    ]
+                  }">
+                </div>
+                """,
+                None,
+            )
+
+        async def get_alphaxiv_paper_legacy(self, arxiv_id):
+            self.calls.append(("alphaxiv", arxiv_id))
+            raise AssertionError("AlphaXiv fallback should not run when Hugging Face search found the exact paper title")
 
     client = FakeDiscoveryClient()
     github_url = await resolve_github_url(

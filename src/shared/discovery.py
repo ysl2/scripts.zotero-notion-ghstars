@@ -380,7 +380,7 @@ async def resolve_github_url(seed, client) -> str | None:
         if error:
             search_html, search_error = await client.get_huggingface_search_html(getattr(seed, "name", ""))
             if not search_error:
-                paper_id = find_huggingface_paper_id_in_search_html(search_html)
+                paper_id = find_huggingface_paper_id_in_search_html(search_html, getattr(seed, "name", ""))
                 if paper_id and paper_id == arxiv_id:
                     github_url, page_error = await _get_huggingface_github_url_by_arxiv_id(client, paper_id)
                     if github_url:
