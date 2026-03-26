@@ -12,12 +12,21 @@ from src.url_to_csv.arxiv_org import (
 )
 
 
-def test_is_supported_arxiv_org_url_accepts_list_collection_pages():
+def test_is_supported_arxiv_org_url_accepts_collection_pages():
     assert is_supported_arxiv_org_url("https://arxiv.org/list/cs.CV/recent")
     assert is_supported_arxiv_org_url("https://arxiv.org/list/cs.CV/new")
     assert is_supported_arxiv_org_url(
         "https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=50&order=-submitted_date"
     )
+    assert is_supported_arxiv_org_url("https://arxiv.org/catchup/cs.CV/2026-03-26")
+    assert is_supported_arxiv_org_url("https://arxiv.org/list/cs.CV/2026-03")
+
+
+def test_is_supported_arxiv_org_url_rejects_malformed_catchup_paths():
+    assert not is_supported_arxiv_org_url("https://arxiv.org/catchup/cs.CV")
+    assert not is_supported_arxiv_org_url("https://arxiv.org/catchup/cs.CV/26-03-2026")
+    assert not is_supported_arxiv_org_url("https://arxiv.org/catchup/cs.CV/2026/03/26")
+    assert not is_supported_arxiv_org_url("https://arxiv.org/catchup/cs.CV/2026-03-26/new")
 
 
 def test_is_supported_arxiv_org_url_rejects_single_paper_pages():
@@ -49,6 +58,24 @@ def test_output_csv_path_for_arxiv_org_search_url_uses_query_and_sort(tmp_path: 
     )
 
     assert csv_path == tmp_path / "arxiv-search-3d-reconstruction-all-submitted-date-20260326113045.csv"
+
+
+def test_output_csv_path_for_arxiv_org_catchup_url_uses_category_and_date(tmp_path: Path):
+    csv_path = output_csv_path_for_arxiv_org_url(
+        "https://arxiv.org/catchup/cs.CV/2026-03-26",
+        output_dir=tmp_path,
+    )
+
+    assert csv_path == tmp_path / "arxiv-cs.CV-catchup-2026-03-26-20260326113045.csv"
+
+
+def test_output_csv_path_for_arxiv_org_list_archive_url_uses_category_and_month(tmp_path: Path):
+    csv_path = output_csv_path_for_arxiv_org_url(
+        "https://arxiv.org/list/cs.CV/2026-03",
+        output_dir=tmp_path,
+    )
+
+    assert csv_path == tmp_path / "arxiv-cs.CV-2026-03-20260326113045.csv"
 
 
 def test_extract_paper_seeds_from_arxiv_list_html_reads_article_pairs():
@@ -236,6 +263,57 @@ async def test_fetch_paper_seeds_from_arxiv_org_url_pages_list_results_until_tot
         "https://arxiv.org/list/cs.CV/recent?skip=2&show=2",
     ]
     assert result.csv_path == tmp_path / "arxiv-cs.CV-recent-20260326113045.csv"
+
+
+@pytest.mark.anyio
+async def test_fetch_paper_seeds_from_arxiv_org_url_accepts_catchup_urls(tmp_path: Path):
+    class FakeArxivOrgClient:
+        async def fetch_page_html(self, url: str):
+            if url == "https://arxiv.org/catchup/cs.CV/2026-03-26":
+                return """
+                <div class='paging'>Total of 2 entries for Thu, 26 Mar 2026</div>
+                <dl id="articles">
+                  <dt><a href="/abs/2603.23502">arXiv:2603.23502</a></dt>
+                  <dd><div class="list-title mathjax"><span class="descriptor">Title:</span> Catchup A</div></dd>
+                  <dt><a href="/abs/2603.23501">arXiv:2603.23501</a></dt>
+                  <dd><div class="list-title mathjax"><span class="descriptor">Title:</span> Catchup B</div></dd>
+                </dl>
+                """
+            raise AssertionError(f"unexpected url: {url}")
+
+    client = FakeArxivOrgClient()
+    result = await fetch_paper_seeds_from_arxiv_org_url(
+        "https://arxiv.org/catchup/cs.CV/2026-03-26",
+        arxiv_org_client=client,
+        output_dir=tmp_path,
+    )
+
+    assert [seed.name for seed in result.seeds] == ["Catchup A", "Catchup B"]
+    assert result.csv_path == tmp_path / "arxiv-cs.CV-catchup-2026-03-26-20260326113045.csv"
+
+
+@pytest.mark.anyio
+async def test_fetch_paper_seeds_from_arxiv_org_url_fails_when_catchup_not_complete(tmp_path: Path):
+    class FakeArxivOrgClient:
+        async def fetch_page_html(self, url: str):
+            if url == "https://arxiv.org/catchup/cs.CV/2026-03-26":
+                return """
+                <div class='paging'>Total of 3 entries for Thu, 26 Mar 2026</div>
+                <dl id="articles">
+                  <dt><a href="/abs/2603.23502">arXiv:2603.23502</a></dt>
+                  <dd><div class="list-title mathjax"><span class="descriptor">Title:</span> Catchup A</div></dd>
+                  <dt><a href="/abs/2603.23501">arXiv:2603.23501</a></dt>
+                  <dd><div class="list-title mathjax"><span class="descriptor">Title:</span> Catchup B</div></dd>
+                </dl>
+                """
+            raise AssertionError(f"unexpected url: {url}")
+
+    with pytest.raises(ValueError, match="Cannot guarantee complete export for this arXiv catchup collection"):
+        await fetch_paper_seeds_from_arxiv_org_url(
+            "https://arxiv.org/catchup/cs.CV/2026-03-26",
+            arxiv_org_client=FakeArxivOrgClient(),
+            output_dir=tmp_path,
+        )
 
 
 @pytest.mark.anyio

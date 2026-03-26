@@ -48,13 +48,17 @@ def is_supported_arxiv_org_url(raw_url: str) -> bool:
         return False
 
     parsed = urlparse(raw_url)
-    host = (parsed.netloc or parsed.hostname or "").lower()
+    host = (parsed.hostname or "").lower()
     path = parsed.path.rstrip("/")
     if parsed.scheme not in {"http", "https"} or host not in ARXIV_ORG_HOSTS:
         return False
 
     if path.startswith("/list/"):
         return True
+    if path.startswith("/catchup/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) == 3 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", parts[2]):
+            return True
 
     return path == "/search"
 
@@ -69,6 +73,13 @@ def output_csv_path_for_arxiv_org_url(raw_url: str, *, output_dir: Path | None =
             category = _sanitize_filename_part(parts[1])
             mode = _sanitize_filename_part(parts[2])
             return build_url_export_csv_path(["arxiv", category, mode], output_dir=output_dir)
+
+    if path.startswith("/catchup/"):
+        parts = [part for part in path.split("/") if part]
+        if len(parts) == 3:
+            category = _sanitize_filename_part(parts[1])
+            date_part = _sanitize_filename_part(parts[2])
+            return build_url_export_csv_path(["arxiv", category, "catchup", date_part], output_dir=output_dir)
 
     if path == "/search":
         query = parse_qs(parsed.query, keep_blank_values=False)
@@ -150,6 +161,15 @@ async def fetch_paper_seeds_from_arxiv_org_url(
         )
         return FetchedSeedsResult(seeds=seeds, csv_path=csv_path)
 
+    if path.startswith("/catchup/"):
+        seeds = await _fetch_list_seeds(
+            input_url,
+            arxiv_org_client=arxiv_org_client,
+            status_callback=status_callback,
+            allow_pagination=False,
+        )
+        return FetchedSeedsResult(seeds=seeds, csv_path=csv_path)
+
     if path == "/search":
         seeds = await _fetch_search_seeds(
             input_url,
@@ -193,7 +213,13 @@ class ArxivOrgClient:
         raise ValueError("arXiv.org page error")
 
 
-async def _fetch_list_seeds(input_url: str, *, arxiv_org_client, status_callback=None) -> list[PaperSeed]:
+async def _fetch_list_seeds(
+    input_url: str,
+    *,
+    arxiv_org_client,
+    status_callback=None,
+    allow_pagination: bool = True,
+) -> list[PaperSeed]:
     if callable(status_callback):
         status_callback("🔎 Fetching arXiv.org list page 1")
 
@@ -212,6 +238,11 @@ async def _fetch_list_seeds(input_url: str, *, arxiv_org_client, status_callback
 
     seeds = list(first_page_seeds)
     seen_urls = {seed.url for seed in seeds}
+    if not allow_pagination:
+        if total_entries > len(first_page_seeds):
+            raise ValueError("Cannot guarantee complete export for this arXiv catchup collection")
+        return seeds
+
     if total_entries <= len(first_page_seeds):
         return seeds
 

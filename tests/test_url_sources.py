@@ -11,6 +11,8 @@ def test_detect_url_source_identifies_supported_sites():
         )
         == UrlSource.ARXIV_ORG
     )
+    assert detect_url_source("https://arxiv.org/catchup/cs.CV/2026-03-26") == UrlSource.ARXIV_ORG
+    assert detect_url_source("https://arxiv.org/list/cs.CV/2026-03") == UrlSource.ARXIV_ORG
     assert detect_url_source("https://huggingface.co/papers/trending?q=semantic") == UrlSource.HUGGINGFACE_PAPERS
     assert (
         detect_url_source(
