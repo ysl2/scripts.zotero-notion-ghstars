@@ -68,6 +68,12 @@ CSV mode behavior:
 
 Reads a supported collection URL and writes a CSV in the current working directory.
 
+Command shape:
+
+```bash
+uv run main.py '<collection-url>'
+```
+
 Currently supported sources:
 
 - `https://arxivxplorer.com/?...`
@@ -81,6 +87,26 @@ Currently supported sources:
 - `https://huggingface.co/papers/month/YYYY-MM`
 - `https://huggingface.co/papers/month/YYYY-MM?q=...`
 - `https://www.semanticscholar.org/search?...`
+
+Common arXiv.org examples:
+
+- latest category page:
+  `https://arxiv.org/list/cs.CV/recent`
+- latest category page with explicit page size:
+  `https://arxiv.org/list/cs.CV/recent?show=1000`
+- new submissions page:
+  `https://arxiv.org/list/cs.CV/new`
+- monthly archive page:
+  `https://arxiv.org/list/cs.CV/2026-03`
+- daily catchup page:
+  `https://arxiv.org/catchup/cs.CV/2026-03-26`
+- search results page:
+  `https://arxiv.org/search/?query=streaming+semantic+3d+reconstruction&searchtype=all&abstracts=show&order=-submitted_date&size=200`
+
+Not supported:
+
+- single paper pages such as `https://arxiv.org/abs/2603.23502`
+- malformed catchup paths such as `https://arxiv.org/catchup/cs.CV/2026/03/26`
 
 ```bash
 uv run main.py 'https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026&year=2025&year=2024'
