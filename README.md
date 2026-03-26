@@ -102,15 +102,16 @@ uv run main.py 'https://www.semanticscholar.org/search?year%5B0%5D=2025&year%5B1
 
 Output example:
 
-- `./arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv`
-- `./arxiv-cs.CV-recent.csv`
-- `./arxiv-search-reconstruction-all-submitted-date.csv`
-- `./huggingface-papers-trending-semantic.csv`
-- `./semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition.csv`
+- `./arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024-20260326113045.csv`
+- `./arxiv-cs.CV-recent-20260326113045.csv`
+- `./arxiv-search-reconstruction-all-submitted-date-20260326113045.csv`
+- `./huggingface-papers-trending-semantic-20260326113045.csv`
+- `./semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition-20260326113045.csv`
 
 URL mode behavior:
 
 - source-specific fetching is kept in separate adapters under `url_to_csv/`
+- every URL export appends a run timestamp in `YYYYMMDDHHMMSS` form before `.csv`
 - standard arXiv `list/...` and `search/...` collection pages are crawled across all pages, not just the first page
 - arXiv `new` pages include all visible sections, including new submissions, cross-lists, and replacements
 - arXiv Xplorer uses the site’s paging API instead of trying to click `Show More` in a browser

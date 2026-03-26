@@ -26,7 +26,7 @@ def test_output_csv_path_for_arxivxplorer_url_uses_current_working_directory(tmp
         output_dir=tmp_path,
     )
 
-    assert csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv"
+    assert csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024-20260326113045.csv"
 
 
 @pytest.mark.anyio
@@ -231,7 +231,9 @@ async def test_export_url_to_csv_writes_sorted_csv_in_output_dir(tmp_path: Path)
     with result.csv_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
-    assert result.csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024.csv"
+    assert result.csv_path == (
+        tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-2025-2024-20260326113045.csv"
+    )
     assert rows == [
         {
             "Name": "Newer",
@@ -298,7 +300,7 @@ async def test_export_url_to_csv_writes_huggingface_results_in_output_dir(tmp_pa
     with result.csv_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
-    assert result.csv_path == tmp_path / "huggingface-papers-trending-semantic.csv"
+    assert result.csv_path == tmp_path / "huggingface-papers-trending-semantic-20260326113045.csv"
     assert rows == [
         {
             "Name": "Newer",
@@ -357,7 +359,7 @@ async def test_export_url_to_csv_writes_arxiv_org_results_in_output_dir(tmp_path
     with result.csv_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
-    assert result.csv_path == tmp_path / "arxiv-cs.CV-recent.csv"
+    assert result.csv_path == tmp_path / "arxiv-cs.CV-recent-20260326113045.csv"
     assert rows == [
         {
             "Name": "Newer",
@@ -428,7 +430,7 @@ async def test_export_url_to_csv_writes_semanticscholar_results_in_output_dir(tm
     with result.csv_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
 
-    assert result.csv_path == tmp_path / "semanticscholar-semantic-3d-reconstruction.csv"
+    assert result.csv_path == tmp_path / "semanticscholar-semantic-3d-reconstruction-20260326113045.csv"
     assert rows == [
         {
             "Name": "Newer",

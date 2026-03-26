@@ -10,6 +10,7 @@ import aiohttp
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import normalize_arxiv_url
 from src.shared.papers import PaperSeed
+from src.url_to_csv.filenames import build_url_export_csv_path
 from src.url_to_csv.models import FetchedSeedsResult
 
 
@@ -40,7 +41,6 @@ def is_supported_huggingface_papers_url(raw_url: str) -> bool:
 def output_csv_path_for_huggingface_papers_url(raw_url: str, *, output_dir: Path | None = None) -> Path:
     parsed = urlparse(raw_url)
     query = parse_qs(parsed.query, keep_blank_values=False)
-    directory = Path(output_dir) if output_dir is not None else Path.cwd()
 
     parts = ["huggingface", "papers"]
     path_parts = [part for part in parsed.path.strip("/").split("/") if part]
@@ -51,8 +51,10 @@ def output_csv_path_for_huggingface_papers_url(raw_url: str, *, output_dir: Path
     if search_text:
         parts.append(_slugify(search_text))
 
-    stem = "-".join(_sanitize_filename_part(part) for part in parts if part)[:200].rstrip("-")
-    return directory / f"{stem}.csv"
+    return build_url_export_csv_path(
+        [_sanitize_filename_part(part) for part in parts if part],
+        output_dir=output_dir,
+    )
 
 
 def extract_paper_seeds_from_huggingface_html(html_text: str) -> list[PaperSeed]:

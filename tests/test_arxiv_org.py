@@ -30,7 +30,7 @@ def test_output_csv_path_for_arxiv_org_recent_url_uses_category_and_mode(tmp_pat
         output_dir=tmp_path,
     )
 
-    assert csv_path == tmp_path / "arxiv-cs.CV-recent.csv"
+    assert csv_path == tmp_path / "arxiv-cs.CV-recent-20260326113045.csv"
 
 
 def test_output_csv_path_for_arxiv_org_new_url_uses_category_and_mode(tmp_path: Path):
@@ -39,7 +39,7 @@ def test_output_csv_path_for_arxiv_org_new_url_uses_category_and_mode(tmp_path: 
         output_dir=tmp_path,
     )
 
-    assert csv_path == tmp_path / "arxiv-cs.CV-new.csv"
+    assert csv_path == tmp_path / "arxiv-cs.CV-new-20260326113045.csv"
 
 
 def test_output_csv_path_for_arxiv_org_search_url_uses_query_and_sort(tmp_path: Path):
@@ -48,7 +48,7 @@ def test_output_csv_path_for_arxiv_org_search_url_uses_query_and_sort(tmp_path: 
         output_dir=tmp_path,
     )
 
-    assert csv_path == tmp_path / "arxiv-search-3d-reconstruction-all-submitted-date.csv"
+    assert csv_path == tmp_path / "arxiv-search-3d-reconstruction-all-submitted-date-20260326113045.csv"
 
 
 def test_extract_paper_seeds_from_arxiv_list_html_reads_article_pairs():
@@ -235,7 +235,7 @@ async def test_fetch_paper_seeds_from_arxiv_org_url_pages_list_results_until_tot
         "https://arxiv.org/list/cs.CV/recent",
         "https://arxiv.org/list/cs.CV/recent?skip=2&show=2",
     ]
-    assert result.csv_path == tmp_path / "arxiv-cs.CV-recent.csv"
+    assert result.csv_path == tmp_path / "arxiv-cs.CV-recent-20260326113045.csv"
 
 
 @pytest.mark.anyio
@@ -284,7 +284,7 @@ async def test_fetch_paper_seeds_from_arxiv_org_url_pages_search_results_until_t
         "https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=2&order=-submitted_date",
         "https://arxiv.org/search/?searchtype=all&query=reconstruction&abstracts=show&size=2&order=-submitted_date&start=2",
     ]
-    assert result.csv_path == tmp_path / "arxiv-search-reconstruction-all-submitted-date.csv"
+    assert result.csv_path == tmp_path / "arxiv-search-reconstruction-all-submitted-date-20260326113045.csv"
 
 
 @pytest.mark.anyio

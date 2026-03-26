@@ -61,7 +61,7 @@ def test_output_csv_path_for_semanticscholar_url_uses_query_terms_and_filters(tm
     assert (
         csv_path
         == tmp_path
-        / "semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition.csv"
+        / "semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition-20260326113045.csv"
     )
 
 
@@ -148,7 +148,7 @@ async def test_fetch_paper_seeds_from_semanticscholar_url_fetches_raw_candidates
     assert client.calls[1].endswith("&page=2")
     assert result.csv_path == (
         tmp_path
-        / "semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition.csv"
+        / "semanticscholar-semantic-3d-reconstruction-2025-2026-computer-science-Computer-Vision-and-Pattern-Recognition-20260326113045.csv"
     )
     assert any("Fetching Semantic Scholar search results page 1" in message for message in messages)
     assert any("Fetched page 2: 2 results" in message for message in messages)

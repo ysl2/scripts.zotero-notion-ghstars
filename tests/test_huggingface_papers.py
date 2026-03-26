@@ -29,7 +29,7 @@ def test_output_csv_path_for_huggingface_papers_url_uses_path_and_query(tmp_path
         output_dir=tmp_path,
     )
 
-    assert csv_path == tmp_path / "huggingface-papers-month-2026-03-semantic.csv"
+    assert csv_path == tmp_path / "huggingface-papers-month-2026-03-semantic-20260326113045.csv"
 
 
 def test_extract_paper_seeds_from_huggingface_html_prefers_rendered_paper_links_when_present():
@@ -158,5 +158,5 @@ async def test_fetch_paper_seeds_from_huggingface_papers_url_reads_page_payload(
 
     assert client.urls == ["https://huggingface.co/papers/trending?q=semantic"]
     assert [seed.url for seed in result.seeds] == ["https://arxiv.org/abs/2502.00002"]
-    assert result.csv_path == tmp_path / "huggingface-papers-trending-semantic.csv"
+    assert result.csv_path == tmp_path / "huggingface-papers-trending-semantic-20260326113045.csv"
     assert any("Fetching Hugging Face Papers collection" in message for message in messages)

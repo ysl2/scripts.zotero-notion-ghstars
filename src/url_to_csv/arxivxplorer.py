@@ -9,6 +9,7 @@ import aiohttp
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import normalize_arxiv_url
 from src.shared.papers import PaperSeed
+from src.url_to_csv.filenames import build_url_export_csv_path
 from src.url_to_csv.models import FetchedSeedsResult
 
 
@@ -54,15 +55,13 @@ def parse_arxivxplorer_url(raw_url: str) -> ArxivXplorerQuery:
 
 def output_csv_path_for_arxivxplorer_url(raw_url: str, *, output_dir: Path | None = None) -> Path:
     query = parse_arxivxplorer_url(raw_url)
-    directory = Path(output_dir) if output_dir is not None else Path.cwd()
     parts = [
         "arxivxplorer",
         _slugify_search_text(query.search_text),
         *(_sanitize_filename_part(category) for category in query.categories),
         *(_sanitize_filename_part(year) for year in query.years),
     ]
-    stem = "-".join(part for part in parts if part)[:200].rstrip("-")
-    return directory / f"{stem}.csv"
+    return build_url_export_csv_path(parts, output_dir=output_dir)
 
 
 def build_search_params(query: ArxivXplorerQuery, page: int) -> list[tuple[str, str]]:

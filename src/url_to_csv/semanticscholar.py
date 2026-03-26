@@ -9,6 +9,7 @@ from src.shared.headless_browser import dump_rendered_html
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import normalize_semanticscholar_paper_url
 from src.shared.papers import PaperSeed
+from src.url_to_csv.filenames import build_url_export_csv_path
 from src.url_to_csv.models import FetchedSeedsResult
 
 
@@ -92,7 +93,6 @@ def parse_semanticscholar_url(raw_url: str) -> SemanticScholarSearchSpec:
 
 def output_csv_path_for_semanticscholar_url(raw_url: str, *, output_dir: Path | None = None) -> Path:
     spec = parse_semanticscholar_url(raw_url)
-    directory = Path(output_dir) if output_dir is not None else Path.cwd()
 
     parts = [
         "semanticscholar",
@@ -101,8 +101,7 @@ def output_csv_path_for_semanticscholar_url(raw_url: str, *, output_dir: Path | 
         *(_sanitize_filename_part(field) for field in spec.fields_of_study),
         *(_sanitize_filename_part(venue) for venue in spec.venues),
     ]
-    stem = "-".join(part for part in parts if part)[:200].rstrip("-")
-    return directory / f"{stem}.csv"
+    return build_url_export_csv_path(parts, output_dir=output_dir)
 
 
 def extract_total_pages_from_semanticscholar_html(html_text: str) -> int:

@@ -9,6 +9,7 @@ import aiohttp
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import normalize_arxiv_url
 from src.shared.papers import PaperSeed
+from src.url_to_csv.filenames import build_url_export_csv_path
 from src.url_to_csv.models import FetchedSeedsResult
 
 
@@ -60,7 +61,6 @@ def is_supported_arxiv_org_url(raw_url: str) -> bool:
 
 def output_csv_path_for_arxiv_org_url(raw_url: str, *, output_dir: Path | None = None) -> Path:
     parsed = urlparse(raw_url)
-    directory = Path(output_dir) if output_dir is not None else Path.cwd()
     path = parsed.path.rstrip("/")
 
     if path.startswith("/list/"):
@@ -68,16 +68,19 @@ def output_csv_path_for_arxiv_org_url(raw_url: str, *, output_dir: Path | None =
         if len(parts) >= 3:
             category = _sanitize_filename_part(parts[1])
             mode = _sanitize_filename_part(parts[2])
-            return directory / f"arxiv-{category}-{mode}.csv"
+            return build_url_export_csv_path(["arxiv", category, mode], output_dir=output_dir)
 
     if path == "/search":
         query = parse_qs(parsed.query, keep_blank_values=False)
         search_text = _slugify(query.get("query", [""])[0] or "search")
         search_type = _sanitize_filename_part((query.get("searchtype", ["all"])[0] or "all").strip()) or "all"
         order = ((query.get("order", [""])[0] or "").strip().lstrip("-").replace("_", "-")) or "relevance"
-        return directory / f"arxiv-search-{search_text}-{search_type}-{_sanitize_filename_part(order)}.csv"
+        return build_url_export_csv_path(
+            ["arxiv", "search", search_text, search_type, _sanitize_filename_part(order)],
+            output_dir=output_dir,
+        )
 
-    return directory / "arxiv-collection.csv"
+    return build_url_export_csv_path(["arxiv", "collection"], output_dir=output_dir)
 
 
 def extract_paper_seeds_from_arxiv_list_html(html_text: str) -> list[PaperSeed]:
