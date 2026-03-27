@@ -108,7 +108,7 @@ def test_discovery_client_enforces_huggingface_rate_limit_floor():
 
     client = DiscoveryClient(session=object(), min_interval=0.2)
 
-    assert client.rate_limiter.min_interval == 0.7
+    assert client.rate_limiter.min_interval == 1.0
 
 
 @pytest.mark.anyio

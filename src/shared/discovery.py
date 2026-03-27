@@ -13,7 +13,7 @@ from src.shared.paper_identity import extract_arxiv_id, normalize_arxiv_url, nor
 
 
 HUGGINGFACE_PAPER_ID_PATTERN = re.compile(r"^[0-9]{4}\.[0-9]{4,5}$")
-HUGGINGFACE_API_MIN_INTERVAL = 0.7
+HUGGINGFACE_API_MIN_INTERVAL = 1.0
 HUGGINGFACE_SEARCH_LIMIT = 1
 HUGGINGFACE_SEARCH_MAX_CONCURRENT = 1
 
