@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import aiohttp
 import pytest
 
 from src.shared.papers import ConversionResult, PaperSeed
@@ -193,6 +194,7 @@ async def test_export_arxiv_relations_to_csv_fails_when_no_openalex_work_found()
     [
         (ValueError, "Invalid single-paper arXiv URL: bad-input"),
         (RuntimeError, "OpenAlex API error (503)"),
+        (aiohttp.ClientError, "connection reset by peer"),
     ],
 )
 async def test_run_arxiv_relations_mode_prints_concise_stderr_and_returns_nonzero_on_expected_errors(

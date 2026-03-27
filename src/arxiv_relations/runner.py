@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -67,7 +68,7 @@ async def run_arxiv_relations_mode(
                     is_minor_reason=is_minor_skip_reason,
                 ),
             )
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
             print(f"ArXiv relation export failed: {exc}", file=sys.stderr)
             return 1
 
