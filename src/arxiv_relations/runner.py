@@ -1,0 +1,88 @@
+import os
+from pathlib import Path
+
+import aiohttp
+
+from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+from src.shared.arxiv import ArxivClient
+from src.shared.discovery import DiscoveryClient
+from src.shared.github import GitHubClient
+from src.shared.openalex import OpenAlexClient
+from src.shared.progress import print_paper_progress, print_summary
+from src.shared.runtime import build_client, load_runtime_config, open_runtime_clients
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.skip_reasons import is_minor_skip_reason
+
+
+CONCURRENT_LIMIT = DEFAULT_CONCURRENT_LIMIT
+REQUEST_DELAY = 0.2
+
+
+async def run_arxiv_relations_mode(
+    arxiv_input: str,
+    *,
+    output_dir: Path | None = None,
+    session_factory=aiohttp.ClientSession,
+    arxiv_client_cls=ArxivClient,
+    openalex_client_cls=OpenAlexClient,
+    discovery_client_cls=DiscoveryClient,
+    github_client_cls=GitHubClient,
+) -> int:
+    config = load_runtime_config(dict(os.environ))
+    async with open_runtime_clients(
+        config,
+        session_factory=session_factory,
+        discovery_client_cls=discovery_client_cls,
+        github_client_cls=github_client_cls,
+        concurrent_limit=CONCURRENT_LIMIT,
+        request_delay=REQUEST_DELAY,
+    ) as runtime:
+        arxiv_client = build_client(
+            arxiv_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        openalex_client = build_client(
+            openalex_client_cls,
+            runtime.session,
+            openalex_api_key=config["openalex_api_key"],
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+
+        result = await export_arxiv_relations_to_csv(
+            arxiv_input,
+            output_dir=output_dir,
+            arxiv_client=arxiv_client,
+            openalex_client=openalex_client,
+            discovery_client=runtime.discovery_client,
+            github_client=runtime.github_client,
+            status_callback=lambda message: print(message, flush=True),
+            progress_callback=lambda outcome, total: print_paper_progress(
+                outcome,
+                total,
+                is_minor_reason=is_minor_skip_reason,
+            ),
+        )
+
+    print_summary(
+        "References resolved",
+        result.references.resolved,
+        result.references.skipped,
+        is_minor_reason=is_minor_skip_reason,
+        detail_label="Paper URL",
+        minor_header="Skipped reference rows (CSV rows still written):",
+    )
+    print(f"Wrote references CSV: {result.references.csv_path}", flush=True)
+    print_summary(
+        "Citations resolved",
+        result.citations.resolved,
+        result.citations.skipped,
+        is_minor_reason=is_minor_skip_reason,
+        detail_label="Paper URL",
+        minor_header="Skipped citation rows (CSV rows still written):",
+    )
+    print(f"Wrote citations CSV: {result.citations.csv_path}", flush=True)
+
+    return 0
