@@ -82,10 +82,14 @@ async def export_arxiv_relations_to_csv(
     if not target_work:
         raise ValueError(f"No OpenAlex work found for title: {title}")
     if callable(status_callback):
-        status_callback("🔎 Fetching OpenAlex references and citations")
-
+        status_callback("🔎 Fetching OpenAlex referenced works")
     referenced_works = await openalex_client.fetch_referenced_works(target_work)
+    if callable(status_callback):
+        status_callback(f"📚 Retrieved {len(referenced_works)} referenced works")
+        status_callback("🔎 Fetching OpenAlex citations")
     citation_works = await openalex_client.fetch_citations(target_work)
+    if callable(status_callback):
+        status_callback(f"📚 Retrieved {len(citation_works)} citation works")
 
     reference_seeds = normalize_related_works_to_seeds(referenced_works, openalex_client=openalex_client)
     citation_seeds = normalize_related_works_to_seeds(citation_works, openalex_client=openalex_client)

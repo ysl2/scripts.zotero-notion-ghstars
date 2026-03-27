@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from src.shared.papers import ConversionResult, PaperSeed
+from src.arxiv_relations.runner import run_arxiv_relations_mode
 
 
 @pytest.mark.anyio
@@ -59,6 +60,7 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
     discovery_client = object()
     github_client = object()
     export_calls = []
+    statuses = []
 
     async def fake_export(
         seeds: list[PaperSeed],
@@ -88,6 +90,7 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
         discovery_client=discovery_client,
         github_client=github_client,
         output_dir=tmp_path,
+        status_callback=statuses.append,
     )
 
     assert arxiv_client.calls == ["https://arxiv.org/abs/2603.23502"]
@@ -114,3 +117,134 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
 
     assert result.references.csv_path.name == "arxiv-2603.23502-references-20260326113045.csv"
     assert result.citations.csv_path.name == "arxiv-2603.23502-citations-20260326113045.csv"
+    assert any("Fetching OpenAlex referenced works" in message for message in statuses)
+    assert any("Fetching OpenAlex citations" in message for message in statuses)
+
+
+@pytest.mark.anyio
+async def test_export_arxiv_relations_to_csv_rejects_invalid_single_paper_input():
+    from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+
+    class FakeArxivClient:
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("Should not request arXiv title for invalid input")
+
+    class FakeOpenAlexClient:
+        async def search_first_work(self, title: str):
+            raise AssertionError("Should not query OpenAlex for invalid input")
+
+    with pytest.raises(ValueError, match="Invalid single-paper arXiv URL"):
+        await export_arxiv_relations_to_csv(
+            "https://arxiv.org/list/cs.CV/recent",
+            arxiv_client=FakeArxivClient(),
+            openalex_client=FakeOpenAlexClient(),
+            discovery_client=object(),
+            github_client=object(),
+        )
+
+
+@pytest.mark.anyio
+async def test_export_arxiv_relations_to_csv_fails_when_arxiv_title_lookup_fails():
+    from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+
+    class FakeArxivClient:
+        async def get_title(self, arxiv_identifier: str):
+            return None, "metadata lookup timeout"
+
+    class FakeOpenAlexClient:
+        async def search_first_work(self, title: str):
+            raise AssertionError("OpenAlex search should not run when title lookup fails")
+
+    with pytest.raises(ValueError, match="Failed to resolve arXiv title: metadata lookup timeout"):
+        await export_arxiv_relations_to_csv(
+            "https://arxiv.org/abs/2603.23502",
+            arxiv_client=FakeArxivClient(),
+            openalex_client=FakeOpenAlexClient(),
+            discovery_client=object(),
+            github_client=object(),
+        )
+
+
+@pytest.mark.anyio
+async def test_export_arxiv_relations_to_csv_fails_when_no_openalex_work_found():
+    from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+
+    class FakeArxivClient:
+        async def get_title(self, arxiv_identifier: str):
+            return "Target Paper", None
+
+    class FakeOpenAlexClient:
+        async def search_first_work(self, title: str):
+            return None
+
+    with pytest.raises(ValueError, match="No OpenAlex work found for title: Target Paper"):
+        await export_arxiv_relations_to_csv(
+            "https://arxiv.org/abs/2603.23502",
+            arxiv_client=FakeArxivClient(),
+            openalex_client=FakeOpenAlexClient(),
+            discovery_client=object(),
+            github_client=object(),
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("exc_type", "message"),
+    [
+        (ValueError, "Invalid single-paper arXiv URL: bad-input"),
+        (RuntimeError, "OpenAlex API error (503)"),
+    ],
+)
+async def test_run_arxiv_relations_mode_prints_concise_stderr_and_returns_nonzero_on_expected_errors(
+    monkeypatch, capsys, exc_type, message
+):
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeArxivClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeOpenAlexClient:
+        def __init__(self, session, *, openalex_api_key="", max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeDiscoveryClient:
+        def __init__(
+            self,
+            session,
+            *,
+            huggingface_token="",
+            repo_cache=None,
+            hf_exact_no_repo_recheck_days=0,
+            max_concurrent=0,
+            min_interval=0,
+        ):
+            self.session = session
+
+    class FakeGitHubClient:
+        def __init__(self, session, *, github_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+
+    async def fake_export(*args, **kwargs):
+        raise exc_type(message)
+
+    monkeypatch.setattr("src.arxiv_relations.runner.export_arxiv_relations_to_csv", fake_export)
+
+    exit_code = await run_arxiv_relations_mode(
+        "https://arxiv.org/abs/2603.23502",
+        session_factory=lambda **kwargs: FakeSession(),
+        arxiv_client_cls=FakeArxivClient,
+        openalex_client_cls=FakeOpenAlexClient,
+        discovery_client_cls=FakeDiscoveryClient,
+        github_client_cls=FakeGitHubClient,
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err.strip() == f"ArXiv relation export failed: {message}"

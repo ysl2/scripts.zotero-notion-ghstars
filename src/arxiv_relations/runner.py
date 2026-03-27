@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import aiohttp
@@ -51,20 +52,24 @@ async def run_arxiv_relations_mode(
             min_interval=REQUEST_DELAY,
         )
 
-        result = await export_arxiv_relations_to_csv(
-            arxiv_input,
-            output_dir=output_dir,
-            arxiv_client=arxiv_client,
-            openalex_client=openalex_client,
-            discovery_client=runtime.discovery_client,
-            github_client=runtime.github_client,
-            status_callback=lambda message: print(message, flush=True),
-            progress_callback=lambda outcome, total: print_paper_progress(
-                outcome,
-                total,
-                is_minor_reason=is_minor_skip_reason,
-            ),
-        )
+        try:
+            result = await export_arxiv_relations_to_csv(
+                arxiv_input,
+                output_dir=output_dir,
+                arxiv_client=arxiv_client,
+                openalex_client=openalex_client,
+                discovery_client=runtime.discovery_client,
+                github_client=runtime.github_client,
+                status_callback=lambda message: print(message, flush=True),
+                progress_callback=lambda outcome, total: print_paper_progress(
+                    outcome,
+                    total,
+                    is_minor_reason=is_minor_skip_reason,
+                ),
+            )
+        except (ValueError, RuntimeError) as exc:
+            print(f"ArXiv relation export failed: {exc}", file=sys.stderr)
+            return 1
 
     print_summary(
         "References resolved",
