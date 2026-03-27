@@ -65,12 +65,10 @@ CSV mode behavior:
 - requires `Url`; `Name` is optional
 - if `Github` is already present and valid, only `Stars` is refreshed
 - if `Github` is blank, discovery checks `cache.db` first, then does one Hugging Face exact lookup on cache miss
-- missing `Github`, `Stars`, `Overview`, and `Abs` columns are added automatically
-- `Overview` and `Abs` are inserted after `Github` / `Stars`
-- `Overview` stores a relative path to a cached markdown file under `./cache/overview/<arxiv_id>.md`
-- `Abs` stores a relative path to a cached markdown file under `./cache/abs/<arxiv_id>.md`
-- the path written into the CSV is relative to that CSV file's directory
+- missing `Github` or `Stars` columns are added automatically at the end of the CSV
+- existing custom columns are left untouched, including any preexisting `Overview` / `Abs` columns
 - cached overview / abs markdown is fetched only when the cache file is missing
+- cached content is stored under `./cache/overview/<arxiv_id>.md` and `./cache/abs/<arxiv_id>.md`
 - overview uses AlphaXiv's public overview API; abs uses AlphaXiv's public paper API
 - writes use a temp file and atomic replace
 

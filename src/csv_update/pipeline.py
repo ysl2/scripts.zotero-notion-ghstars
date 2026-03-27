@@ -12,9 +12,7 @@ NAME_COLUMN = "Name"
 URL_COLUMN = "Url"
 GITHUB_COLUMN = "Github"
 STARS_COLUMN = "Stars"
-OVERVIEW_COLUMN = "Overview"
-ABS_COLUMN = "Abs"
-MANAGED_COLUMNS = (GITHUB_COLUMN, STARS_COLUMN, OVERVIEW_COLUMN, ABS_COLUMN)
+MANAGED_COLUMNS = (GITHUB_COLUMN, STARS_COLUMN)
 
 
 @dataclass(frozen=True)
@@ -128,7 +126,7 @@ async def build_csv_row_outcome(
             relative_to=csv_dir,
         )
     )
-    enrichment, overview_path, abs_path = await asyncio.gather(enrichment_task, overview_task, abs_task)
+    enrichment, _overview_path, _abs_path = await asyncio.gather(enrichment_task, overview_task, abs_task)
 
     if enrichment.url and enrichment.url != url and enrichment.reason != "No valid arXiv URL found":
         updated_row[URL_COLUMN] = enrichment.url
@@ -138,10 +136,6 @@ async def build_csv_row_outcome(
 
     if enrichment.reason is None and enrichment.stars is not None:
         updated_row[STARS_COLUMN] = str(enrichment.stars)
-    if overview_path:
-        updated_row[OVERVIEW_COLUMN] = overview_path
-    if abs_path:
-        updated_row[ABS_COLUMN] = abs_path
 
     github_url_set = None
     source_label = None
@@ -209,13 +203,11 @@ def _write_csv_rows(csv_path: Path, fieldnames: list[str], rows: list[dict[str, 
 
 
 def _normalize_fieldnames(fieldnames: list[str]) -> list[str]:
-    if URL_COLUMN not in fieldnames:
-        return fieldnames
-
-    managed_indices = [index for index, name in enumerate(fieldnames) if name in MANAGED_COLUMNS]
-    insert_at = min(managed_indices) if managed_indices else len(fieldnames)
-    base_fieldnames = [name for name in fieldnames if name not in MANAGED_COLUMNS]
-    return base_fieldnames[:insert_at] + list(MANAGED_COLUMNS) + base_fieldnames[insert_at:]
+    normalized = list(fieldnames)
+    for column in MANAGED_COLUMNS:
+        if column not in normalized:
+            normalized.append(column)
+    return normalized
 
 
 async def _ensure_content_path(content_cache, *, kind: str, url: str, relative_to: Path) -> str:

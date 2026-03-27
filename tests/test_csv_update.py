@@ -83,7 +83,7 @@ async def test_update_csv_file_updates_rows_in_place_preserving_columns_and_orde
     assert len(result.skipped) == 1
     assert result.skipped[0]["title"] == "Invalid Url"
     assert result.skipped[0]["reason"] == "No valid arXiv URL found"
-    assert reader.fieldnames == ["Name", "Url", "Notes", "Github", "Stars", "Overview", "Abs", "Tag"]
+    assert reader.fieldnames == ["Name", "Url", "Notes", "Github", "Stars", "Tag"]
     assert discovery_client.urls == ["https://arxiv.org/abs/2603.10000"]
     assert rows == [
         {
@@ -92,8 +92,6 @@ async def test_update_csv_file_updates_rows_in_place_preserving_columns_and_orde
             "Notes": "note-1",
             "Github": "https://github.com/foo/existing",
             "Stars": "99",
-            "Overview": "cache/overview/2603.20000.md",
-            "Abs": "cache/abs/2603.20000.md",
             "Tag": "A",
         },
         {
@@ -102,8 +100,6 @@ async def test_update_csv_file_updates_rows_in_place_preserving_columns_and_orde
             "Notes": "note-2",
             "Github": "https://github.com/foo/discovered",
             "Stars": "42",
-            "Overview": "cache/overview/2603.10000.md",
-            "Abs": "cache/abs/2603.10000.md",
             "Tag": "B",
         },
         {
@@ -112,8 +108,6 @@ async def test_update_csv_file_updates_rows_in_place_preserving_columns_and_orde
             "Notes": "note-3",
             "Github": "",
             "Stars": "9",
-            "Overview": "",
-            "Abs": "",
             "Tag": "C",
         },
     ]
@@ -130,7 +124,7 @@ async def test_update_csv_file_updates_rows_in_place_preserving_columns_and_orde
 
 
 @pytest.mark.anyio
-async def test_update_csv_file_appends_missing_content_columns_after_github_and_stars(tmp_path: Path):
+async def test_update_csv_file_appends_missing_github_and_stars_columns_at_the_end(tmp_path: Path):
     csv_path = tmp_path / "papers.csv"
     csv_path.write_text(
         "\n".join(
@@ -169,7 +163,7 @@ async def test_update_csv_file_appends_missing_content_columns_after_github_and_
     assert len(result.skipped) == 1
     assert result.skipped[0]["title"] == "Paper B"
     assert result.skipped[0]["reason"] == "No valid arXiv URL found"
-    assert reader.fieldnames == ["Name", "Url", "Notes", "Github", "Stars", "Overview", "Abs"]
+    assert reader.fieldnames == ["Name", "Url", "Notes", "Github", "Stars"]
     assert rows == [
         {
             "Name": "Paper A",
@@ -177,8 +171,6 @@ async def test_update_csv_file_appends_missing_content_columns_after_github_and_
             "Notes": "note-a",
             "Github": "https://github.com/foo/bar",
             "Stars": "7",
-            "Overview": "cache/overview/2603.30000.md",
-            "Abs": "cache/abs/2603.30000.md",
         },
         {
             "Name": "Paper B",
@@ -186,8 +178,6 @@ async def test_update_csv_file_appends_missing_content_columns_after_github_and_
             "Notes": "note-b",
             "Github": "",
             "Stars": "",
-            "Overview": "",
-            "Abs": "",
         },
     ]
 
@@ -266,15 +256,13 @@ async def test_update_csv_file_allows_missing_name_column_when_url_exists(tmp_pa
             "Notes": "note-a",
             "Github": "https://github.com/foo/bar",
             "Stars": "7",
-            "Overview": "cache/overview/2603.30000.md",
-            "Abs": "cache/abs/2603.30000.md",
         }
     ]
-    assert reader.fieldnames == ["Url", "Notes", "Github", "Stars", "Overview", "Abs"]
+    assert reader.fieldnames == ["Url", "Notes", "Github", "Stars"]
 
 
 @pytest.mark.anyio
-async def test_update_csv_file_fills_blank_stars_for_existing_github_and_still_populates_content_paths(tmp_path: Path):
+async def test_update_csv_file_fills_blank_stars_for_existing_github_without_adding_content_columns(tmp_path: Path):
     csv_path = tmp_path / "papers.csv"
     csv_path.write_text(
         "\n".join(
@@ -314,8 +302,6 @@ async def test_update_csv_file_fills_blank_stars_for_existing_github_and_still_p
             "Url": "https://arxiv.org/abs/2603.20000",
             "Github": "https://github.com/foo/bar",
             "Stars": "11",
-            "Overview": "cache/overview/2603.20000.md",
-            "Abs": "cache/abs/2603.20000.md",
         }
     ]
 
@@ -361,8 +347,6 @@ async def test_update_csv_file_keeps_overview_and_abs_updates_when_github_discov
             "Url": "https://arxiv.org/abs/2603.20000",
             "Github": "",
             "Stars": "",
-            "Overview": "cache/overview/2603.20000.md",
-            "Abs": "cache/abs/2603.20000.md",
         }
     ]
 
@@ -405,8 +389,55 @@ async def test_build_csv_row_outcome_runs_github_overview_and_abs_work_in_parall
 
     assert elapsed < 0.35
     assert outcome.reason is None
-    assert updated_row["Overview"] == "cache/overview/2603.30000.md"
-    assert updated_row["Abs"] == "cache/abs/2603.30000.md"
+    assert "Overview" not in updated_row
+    assert "Abs" not in updated_row
+
+
+@pytest.mark.anyio
+async def test_update_csv_file_leaves_preexisting_overview_and_abs_columns_unchanged(tmp_path: Path):
+    csv_path = tmp_path / "papers.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Name,Url,Overview,Abs",
+                "Paper A,https://arxiv.org/abs/2603.30000v1,old-overview.md,old-abs.md",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            return "https://github.com/foo/bar"
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            return 7, None
+
+    result = await update_csv_file(
+        csv_path,
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+        content_cache=FakeContentCache(),
+    )
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+
+    assert result.updated == 1
+    assert reader.fieldnames == ["Name", "Url", "Overview", "Abs", "Github", "Stars"]
+    assert rows == [
+        {
+            "Name": "Paper A",
+            "Url": "https://arxiv.org/abs/2603.30000",
+            "Overview": "old-overview.md",
+            "Abs": "old-abs.md",
+            "Github": "https://github.com/foo/bar",
+            "Stars": "7",
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -544,8 +575,6 @@ async def test_run_csv_mode_prints_progress_updates_file_and_writes_cached_markd
             "Url": "https://arxiv.org/abs/2603.20000",
             "Github": "https://github.com/foo/bar",
             "Stars": "11",
-            "Overview": "cache/overview/2603.20000.md",
-            "Abs": "cache/abs/2603.20000.md",
         }
     ]
     assert (tmp_path / "cache" / "overview" / "2603.20000.md").read_text(encoding="utf-8").find("Overview body") != -1
