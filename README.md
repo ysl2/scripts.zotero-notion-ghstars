@@ -27,9 +27,8 @@ Copy `.env.example` to `.env` and fill in the variables you need.
 ### Used by CSV and URL modes
 
 ```bash
-GITHUB_TOKEN=your_github_token_here
-HUGGINGFACE_TOKEN=your_huggingface_token_here
-ALPHAXIV_TOKEN=your_alphaxiv_token_here
+GITHUB_TOKEN=
+HUGGINGFACE_TOKEN=
 HF_EXACT_NO_REPO_THRESHOLD=10
 ```
 
@@ -38,8 +37,8 @@ HF_EXACT_NO_REPO_THRESHOLD=10
 ### Required only for Notion mode
 
 ```bash
-NOTION_TOKEN=your_notion_token_here
-DATABASE_ID=your_database_id_here
+NOTION_TOKEN=
+DATABASE_ID=
 ```
 
 ## Usage
