@@ -115,11 +115,32 @@ async def test_query_params_include_openalex_api_key_when_present():
 def test_normalizes_related_work_from_location_url():
     session = FakeSession([])
     client = OpenAlexClient(session, min_interval=0)
-    work = {"display_name": "Location Paper", "locations": [{"url": "https://arxiv.org/pdf/2403.00002.pdf"}]}
+    work = {
+        "display_name": "Location Paper",
+        "locations": [
+            {
+                "landing_page_url": "https://arxiv.org/abs/2403.00002v1",
+                "pdf_url": "https://arxiv.org/pdf/2403.00002.pdf",
+            }
+        ],
+    }
 
     seed = client.normalize_related_work(work)
 
     assert seed == PaperSeed(name="Location Paper", url="https://arxiv.org/abs/2403.00002")
+
+
+def test_normalizes_related_work_from_location_pdf_url():
+    session = FakeSession([])
+    client = OpenAlexClient(session, min_interval=0)
+    work = {
+        "display_name": "PDF Location Paper",
+        "locations": [{"pdf_url": "https://arxiv.org/pdf/2403.00005.pdf"}],
+    }
+
+    seed = client.normalize_related_work(work)
+
+    assert seed == PaperSeed(name="PDF Location Paper", url="https://arxiv.org/abs/2403.00005")
 
 
 def test_normalizes_related_work_from_doi():

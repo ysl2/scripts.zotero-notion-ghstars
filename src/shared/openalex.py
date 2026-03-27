@@ -130,7 +130,10 @@ class OpenAlexClient:
         for location in locations:
             location_url = None
             if isinstance(location, dict):
-                location_url = location.get("url")
+                for key in ("landing_page_url", "pdf_url", "url", "source", "source_id"):
+                    location_url = location.get(key)
+                    if location_url:
+                        break
             elif isinstance(location, str):
                 location_url = location
 
