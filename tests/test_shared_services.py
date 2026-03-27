@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.legacy.alphaxiv import find_github_url_in_alphaxiv_legacy_payload
 from src.shared.discovery import (
-    find_github_url_in_alphaxiv_legacy_payload,
     find_huggingface_paper_id_in_search_html,
     find_github_url_in_huggingface_paper_html,
     resolve_arxiv_id_by_title,
@@ -355,7 +355,6 @@ async def test_resolve_github_url_reads_semanticscholar_detail_pages():
     class FakeDiscoveryClient:
         def __init__(self):
             self.huggingface_token = ""
-            self.alphaxiv_token = ""
             self.calls = []
 
         async def get_semanticscholar_paper_html(self, url):
@@ -394,76 +393,16 @@ async def test_discovery_client_caches_concurrent_github_resolution_for_same_pap
     client.get_huggingface_paper_payload_by_arxiv_id = fake_get_huggingface_paper_payload_by_arxiv_id
     client.get_huggingface_paper_search_results = fake_get_huggingface_paper_search_results
 
-    seed = FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493")
+    first_seed = FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493")
+    second_seed = FakeSeed(name="Totally Different Display Name", url="https://arxiv.org/abs/2603.18493")
     first, second = await asyncio.gather(
-        client.resolve_github_url(seed),
-        client.resolve_github_url(seed),
+        client.resolve_github_url(first_seed),
+        client.resolve_github_url(second_seed),
     )
 
     assert first == "https://github.com/foo/bar"
     assert second == "https://github.com/foo/bar"
     assert calls == ["2603.18493"]
-
-
-@pytest.mark.anyio
-async def test_discovery_client_does_not_serialize_different_upstreams_under_one_shared_semaphore():
-    from src.shared.discovery import DiscoveryClient
-
-    release_response = asyncio.Event()
-
-    class FakeResponse:
-        def __init__(self, payload, *, status=200):
-            self.payload = payload
-            self.status = status
-
-        async def __aenter__(self):
-            await release_response.wait()
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def text(self):
-            return self.payload
-
-        async def json(self):
-            return self.payload
-
-    class FakeSession:
-        def __init__(self):
-            self.calls = []
-
-        def get(self, url, headers=None, params=None):
-            self.calls.append(url)
-            if "api.alphaxiv.org" in url:
-                return FakeResponse({"paper": {"implementation": "https://github.com/foo/bar"}})
-            return FakeResponse('<script>window.__DATA__={"githubRepo":"https://github.com/foo/bar"}</script>')
-
-    session = FakeSession()
-    client = DiscoveryClient(
-        session=session,
-        huggingface_token="hf_token",
-        alphaxiv_token="ax_token",
-        max_concurrent=1,
-        min_interval=0,
-    )
-
-    hf_task = asyncio.create_task(client.get_huggingface_paper_html_by_arxiv_id("2603.18493"))
-    alphaxiv_task = asyncio.create_task(client.get_alphaxiv_paper_legacy("2603.18493"))
-
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-
-    assert session.calls == [
-        "https://huggingface.co/papers/2603.18493",
-        "https://api.alphaxiv.org/papers/v3/legacy/2603.18493",
-    ]
-
-    release_response.set()
-    hf_result, alphaxiv_result = await asyncio.gather(hf_task, alphaxiv_task)
-
-    assert hf_result == ('<script>window.__DATA__={"githubRepo":"https://github.com/foo/bar"}</script>', None)
-    assert alphaxiv_result == ({"paper": {"implementation": "https://github.com/foo/bar"}}, None)
 
 
 @pytest.mark.anyio

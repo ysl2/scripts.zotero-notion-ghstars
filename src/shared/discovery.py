@@ -43,24 +43,6 @@ def find_github_url_in_text(text: str) -> str | None:
     return None
 
 
-def find_github_url_in_json_payload(payload) -> str | None:
-    if isinstance(payload, str):
-        return find_github_url_in_text(payload)
-    if isinstance(payload, list):
-        for item in payload:
-            result = find_github_url_in_json_payload(item)
-            if result:
-                return result
-        return None
-    if isinstance(payload, dict):
-        for value in payload.values():
-            result = find_github_url_in_json_payload(value)
-            if result:
-                return result
-        return None
-    return None
-
-
 def find_github_url_in_huggingface_paper_html(html: str) -> str | None:
     if not html or not isinstance(html, str):
         return None
@@ -206,26 +188,6 @@ def _iter_huggingface_search_items(html: str):
     return output
 
 
-def find_github_url_in_alphaxiv_legacy_payload(payload) -> str | None:
-    if not isinstance(payload, dict):
-        return None
-
-    paper = payload.get("paper", {}) if isinstance(payload.get("paper"), dict) else {}
-    candidates = [
-        paper.get("implementation"),
-        paper.get("marimo_implementation"),
-        paper.get("paper_group", {}).get("resources") if isinstance(paper.get("paper_group"), dict) else None,
-        paper.get("resources"),
-    ]
-
-    for candidate in candidates:
-        github_url = find_github_url_in_json_payload(candidate)
-        if github_url:
-            return github_url
-
-    return find_github_url_in_json_payload(payload)
-
-
 class DiscoveryClient:
     """Discovery client for GitHub repo lookup and paper identity helpers."""
 
@@ -234,7 +196,6 @@ class DiscoveryClient:
         session: aiohttp.ClientSession,
         *,
         huggingface_token: str = "",
-        alphaxiv_token: str = "",
         repo_cache=None,
         hf_exact_no_repo_recheck_days: int = HF_EXACT_NO_REPO_RECHECK_DAYS,
         max_concurrent: int = 5,
@@ -242,12 +203,10 @@ class DiscoveryClient:
     ):
         self.session = session
         self.huggingface_token = huggingface_token
-        self.alphaxiv_token = alphaxiv_token
         self.repo_cache = repo_cache
         self.hf_exact_no_repo_recheck_days = hf_exact_no_repo_recheck_days
         self._huggingface_gate = _DiscoveryRequestGate(max_concurrent, resolve_huggingface_min_interval(min_interval))
         self._huggingface_search_semaphore = asyncio.Semaphore(HUGGINGFACE_SEARCH_MAX_CONCURRENT)
-        self._alphaxiv_gate = _DiscoveryRequestGate(max_concurrent, min_interval)
         self._semanticscholar_gate = _DiscoveryRequestGate(max_concurrent, min_interval)
         self.semaphore = self._huggingface_gate.semaphore
         self.rate_limiter = self._huggingface_gate.rate_limiter
@@ -336,18 +295,6 @@ class DiscoveryClient:
                 retry_prefix="Hugging Face Papers",
                 gate=self._huggingface_gate,
             )
-
-    async def get_alphaxiv_paper_legacy(self, arxiv_id: str):
-        if not self.alphaxiv_token:
-            return None, "Missing ALPHAXIV_TOKEN"
-        headers = {"Accept": "application/json", "User-Agent": "scripts.ghstars", "Authorization": f"Bearer {self.alphaxiv_token}"}
-        return await self._request(
-            f"https://api.alphaxiv.org/papers/v3/legacy/{arxiv_id}",
-            headers=headers,
-            expect="json",
-            retry_prefix="AlphaXiv API",
-            gate=self._alphaxiv_gate,
-        )
 
     async def get_semanticscholar_paper_html(self, url: str):
         normalized_url = normalize_semanticscholar_paper_url(url)

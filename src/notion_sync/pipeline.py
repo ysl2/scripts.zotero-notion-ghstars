@@ -32,6 +32,14 @@ def get_current_stars_from_page(page: dict) -> int | None:
     return None
 
 
+def get_github_property_type(page: dict) -> str | None:
+    github_property = page.get("properties", {}).get(GITHUB_PROPERTY_NAME, {})
+    property_type = github_property.get("type")
+    if property_type in {"url", "rich_text"}:
+        return property_type
+    return None
+
+
 def classify_github_value(value) -> str:
     if value is None:
         return "empty"
@@ -134,17 +142,14 @@ async def resolve_repo_for_page(page: dict, discovery_client, arxiv_client=None)
             "reason": "Unsupported Github field content",
         }
 
-    has_hf = bool(getattr(discovery_client, "huggingface_token", ""))
-    has_ax = bool(getattr(discovery_client, "alphaxiv_token", ""))
-    if not has_hf and not has_ax:
-        resolver = getattr(discovery_client, "resolve_github_url", None)
-        if not callable(resolver):
-            return {
-                "github_url": None,
-                "source": None,
-                "needs_github_update": False,
-                "reason": "No fallback discovery token configured",
-            }
+    resolver = getattr(discovery_client, "resolve_github_url", None)
+    if not callable(resolver):
+        return {
+            "github_url": None,
+            "source": None,
+            "needs_github_update": False,
+            "reason": "No fallback discovery token configured",
+        }
 
     arxiv_id, arxiv_source, error = await resolve_arxiv_id_for_page(
         page,
@@ -162,8 +167,7 @@ async def resolve_repo_for_page(page: dict, discovery_client, arxiv_client=None)
 
     title = get_page_title(page)
     seed = SimpleNamespace(name=title, url=f"https://arxiv.org/abs/{arxiv_id}")
-    resolver = getattr(discovery_client, "resolve_github_url", None)
-    github_url = await resolver(seed) if callable(resolver) else None
+    github_url = await resolver(seed)
     if github_url:
         return {
             "github_url": github_url,
@@ -204,6 +208,7 @@ async def process_page(
 ) -> None:
     page_id = page["id"]
     current_stars = get_current_stars_from_page(page)
+    github_property_type = get_github_property_type(page) or "url"
     title = get_page_title(page) or page_id
     notion_url = get_page_url(page)
 
@@ -262,6 +267,7 @@ async def process_page(
             page_id,
             github_url=github_url if resolution["needs_github_update"] else None,
             stars_count=new_stars,
+            github_property_type=github_property_type,
         )
     except Exception as exc:
         reason = f"Notion update failed: {exc}"

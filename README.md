@@ -24,7 +24,7 @@ uv sync
 
 Copy `.env.example` to `.env` and fill in the variables you need.
 
-### Used by CSV and URL modes
+### Optional in all modes
 
 ```bash
 GITHUB_TOKEN=
@@ -62,6 +62,7 @@ uv run main.py /path/to/papers.csv
 CSV mode behavior:
 
 - uses canonical arXiv `Url` as the paper identity
+- requires `Url`; `Name` is optional
 - if `Github` is already present and valid, only `Stars` is refreshed
 - if `Github` is blank, discovery checks `cache.db` first, then does one Hugging Face exact lookup on cache miss
 - missing `Github` or `Stars` columns are appended automatically
@@ -215,6 +216,9 @@ Your Notion database should have:
 - `Github` as URL or rich text
 - `Stars` as number
 
+If `Github` or `Stars` is missing from the data source schema, Notion mode creates them automatically before querying pages.
+Newly created `Github` is a URL property; newly created `Stars` is a number property.
+
 Optional arXiv source fields for fallback discovery:
 
 - `URL`
@@ -225,13 +229,16 @@ Optional arXiv source fields for fallback discovery:
 
 When `Github` is empty, the sync flow:
 
-1. checks `cache.db` for the canonical arXiv URL
-2. if needed, calls Hugging Face exact paper API for that arXiv id
-3. stores confirmed repos in `cache.db`
-4. stores successful exact no-repo outcomes as a counter in `cache.db`
+1. resolves the paper to a canonical arXiv URL from URL fields first, then title search fallback
+2. uses that canonical arXiv URL as the paper identity for repo discovery and stars lookup
+3. checks `cache.db` for that canonical arXiv URL
+4. if needed, calls Hugging Face exact paper API for that arXiv id
+5. stores confirmed repos in `cache.db`
 
 When Hugging Face exact responds successfully but without a `githubRepo`, the cache stores the successful check timestamp.
 `HF_EXACT_NO_REPO_RECHECK_DAYS` controls how many days to wait before re-checking that no-repo cache entry again.
+
+Notion page updates still target the original page id; only the paper-identity portion of discovery uses canonical arXiv URLs.
 
 ## Notes
 

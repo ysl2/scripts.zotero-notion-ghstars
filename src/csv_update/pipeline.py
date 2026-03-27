@@ -158,6 +158,8 @@ def _read_csv_rows(csv_path: Path) -> tuple[list[dict[str, str]], list[str]]:
         if reader.fieldnames is None:
             raise ValueError("CSV file must include a header row")
         fieldnames = list(reader.fieldnames)
+        if URL_COLUMN not in fieldnames:
+            raise ValueError("CSV file must include Url column")
         for column in REQUIRED_COLUMNS:
             if column not in fieldnames:
                 fieldnames.append(column)

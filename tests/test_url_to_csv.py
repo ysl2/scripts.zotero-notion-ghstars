@@ -597,10 +597,9 @@ async def test_run_url_mode_supports_arxiv_org_url(tmp_path: Path, capsys):
             raise AssertionError("Semantic Scholar client should not be used for arXiv.org URLs")
 
     class FakeDiscoveryClient:
-        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+        def __init__(self, session, *, huggingface_token="", max_concurrent=0, min_interval=0):
             self.session = session
             self.huggingface_token = huggingface_token
-            self.alphaxiv_token = alphaxiv_token
 
         async def resolve_github_url(self, seed):
             return "https://github.com/foo/bar"
@@ -659,10 +658,9 @@ async def test_run_url_mode_prints_fetch_and_paper_progress(tmp_path: Path, caps
             return data[page]
 
     class FakeDiscoveryClient:
-        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+        def __init__(self, session, *, huggingface_token="", max_concurrent=0, min_interval=0):
             self.session = session
             self.huggingface_token = huggingface_token
-            self.alphaxiv_token = alphaxiv_token
 
         async def resolve_github_url(self, seed):
             return "https://github.com/foo/bar"
@@ -732,10 +730,9 @@ async def test_run_url_mode_supports_huggingface_papers_collection_url(tmp_path:
             )
 
     class FakeDiscoveryClient:
-        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+        def __init__(self, session, *, huggingface_token="", max_concurrent=0, min_interval=0):
             self.session = session
             self.huggingface_token = huggingface_token
-            self.alphaxiv_token = alphaxiv_token
 
         async def resolve_github_url(self, seed):
             return "https://github.com/foo/bar"
@@ -813,10 +810,9 @@ async def test_run_url_mode_supports_semanticscholar_url(tmp_path: Path, capsys)
             return "2501.00001", "title_search_exact", None
 
     class FakeDiscoveryClient:
-        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+        def __init__(self, session, *, huggingface_token="", max_concurrent=0, min_interval=0):
             self.session = session
             self.huggingface_token = huggingface_token
-            self.alphaxiv_token = alphaxiv_token
 
         async def resolve_github_url(self, seed):
             return "https://github.com/foo/bar"

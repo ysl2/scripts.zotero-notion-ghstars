@@ -7,11 +7,9 @@ import aiohttp
 from src.shared.arxiv import ArxivClient
 from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient
-from src.shared.http import build_timeout
 from src.shared.progress import print_paper_progress, print_summary
-from src.shared.repo_cache import RepoCacheStore
-from src.shared.runtime import build_client, load_runtime_config
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT, REPO_CACHE_DB_PATH
+from src.shared.runtime import build_client, load_runtime_config, open_runtime_clients
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
 from src.shared.skip_reasons import is_minor_skip_reason
 from src.url_to_csv.arxivxplorer import ArxivXplorerSearchClient
 from src.url_to_csv.arxiv_org import ArxivOrgClient
@@ -43,77 +41,62 @@ async def run_url_mode(
         return 1
 
     config = load_runtime_config(dict(os.environ))
-    repo_cache = RepoCacheStore(REPO_CACHE_DB_PATH)
+    async with open_runtime_clients(
+        config,
+        session_factory=session_factory,
+        discovery_client_cls=discovery_client_cls,
+        github_client_cls=github_client_cls,
+        concurrent_limit=CONCURRENT_LIMIT,
+        request_delay=REQUEST_DELAY,
+    ) as runtime:
+        arxiv_client = build_client(
+            arxiv_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        search_client = build_client(
+            search_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        arxiv_org_client = build_client(
+            arxiv_org_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        huggingface_papers_client = build_client(
+            huggingface_papers_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        semanticscholar_client = build_client(
+            semanticscholar_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
 
-    try:
-        async with session_factory(timeout=build_timeout()) as session:
-            arxiv_client = build_client(
-                arxiv_client_cls,
-                session,
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-            search_client = build_client(
-                search_client_cls,
-                session,
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-            arxiv_org_client = build_client(
-                arxiv_org_client_cls,
-                session,
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-            huggingface_papers_client = build_client(
-                huggingface_papers_client_cls,
-                session,
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-            semanticscholar_client = build_client(
-                semanticscholar_client_cls,
-                session,
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-            discovery_client = build_client(
-                discovery_client_cls,
-                session,
-                huggingface_token=config["huggingface_token"],
-                alphaxiv_token=config["alphaxiv_token"],
-                repo_cache=repo_cache,
-                hf_exact_no_repo_recheck_days=config["hf_exact_no_repo_recheck_days"],
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-            github_client = build_client(
-                github_client_cls,
-                session,
-                github_token=config["github_token"],
-                max_concurrent=CONCURRENT_LIMIT,
-                min_interval=REQUEST_DELAY,
-            )
-
-            result = await export_url_to_csv(
-                input_url,
-                output_dir=output_dir,
-                search_client=search_client,
-                arxiv_org_client=arxiv_org_client,
-                huggingface_papers_client=huggingface_papers_client,
-                semanticscholar_client=semanticscholar_client,
-                arxiv_client=arxiv_client,
-                discovery_client=discovery_client,
-                github_client=github_client,
-                status_callback=lambda message: print(message, flush=True),
-                progress_callback=lambda outcome, total: print_paper_progress(
-                    outcome,
-                    total,
-                    is_minor_reason=is_minor_skip_reason,
-                ),
-            )
-    finally:
-        repo_cache.close()
+        result = await export_url_to_csv(
+            input_url,
+            output_dir=output_dir,
+            search_client=search_client,
+            arxiv_org_client=arxiv_org_client,
+            huggingface_papers_client=huggingface_papers_client,
+            semanticscholar_client=semanticscholar_client,
+            arxiv_client=arxiv_client,
+            discovery_client=runtime.discovery_client,
+            github_client=runtime.github_client,
+            status_callback=lambda message: print(message, flush=True),
+            progress_callback=lambda outcome, total: print_paper_progress(
+                outcome,
+                total,
+                is_minor_reason=is_minor_skip_reason,
+            ),
+        )
 
     print_summary(
         "Resolved",

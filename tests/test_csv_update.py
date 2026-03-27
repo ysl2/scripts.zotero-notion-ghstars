@@ -146,6 +146,83 @@ async def test_update_csv_file_appends_missing_github_and_stars_columns(tmp_path
 
 
 @pytest.mark.anyio
+async def test_update_csv_file_requires_url_column(tmp_path: Path):
+    csv_path = tmp_path / "papers.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Name,Github,Stars",
+                "Paper A,,",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            raise AssertionError("discovery should not run when Url column is missing")
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            raise AssertionError("GitHub should not run when Url column is missing")
+
+    with pytest.raises(ValueError, match="CSV file must include Url column"):
+        await update_csv_file(
+            csv_path,
+            discovery_client=FakeDiscoveryClient(),
+            github_client=FakeGitHubClient(),
+        )
+
+
+@pytest.mark.anyio
+async def test_update_csv_file_allows_missing_name_column_when_url_exists(tmp_path: Path):
+    csv_path = tmp_path / "papers.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "Url,Notes",
+                "https://arxiv.org/abs/2603.30000v1,note-a",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            assert seed.name == "Row 1"
+            assert seed.url == "https://arxiv.org/abs/2603.30000"
+            return "https://github.com/foo/bar"
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            assert (owner, repo) == ("foo", "bar")
+            return 7, None
+
+    result = await update_csv_file(
+        csv_path,
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+    )
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+
+    assert result.updated == 1
+    assert rows == [
+        {
+            "Url": "https://arxiv.org/abs/2603.30000",
+            "Notes": "note-a",
+            "Github": "https://github.com/foo/bar",
+            "Stars": "7",
+        }
+    ]
+    assert reader.fieldnames == ["Url", "Notes", "Github", "Stars"]
+
+
+@pytest.mark.anyio
 async def test_update_csv_file_fills_blank_stars_for_existing_github(tmp_path: Path):
     csv_path = tmp_path / "papers.csv"
     csv_path.write_text(
@@ -211,10 +288,9 @@ async def test_run_csv_mode_prints_progress_and_updates_file(tmp_path: Path, cap
             return False
 
     class FakeDiscoveryClient:
-        def __init__(self, session, *, huggingface_token="", alphaxiv_token="", max_concurrent=0, min_interval=0):
+        def __init__(self, session, *, huggingface_token="", max_concurrent=0, min_interval=0):
             self.session = session
             self.huggingface_token = huggingface_token
-            self.alphaxiv_token = alphaxiv_token
 
         async def resolve_github_url(self, seed):
             return "https://github.com/foo/bar"

@@ -25,10 +25,21 @@ class NotionClient:
         *,
         github_url: str | None = None,
         stars_count: int | None = None,
+        github_property_type: str = "url",
     ) -> None:
         properties = {}
         if github_url is not None:
-            properties[GITHUB_PROPERTY_NAME] = {"url": github_url}
+            if github_property_type == "rich_text":
+                properties[GITHUB_PROPERTY_NAME] = {
+                    "rich_text": [
+                        {
+                            "type": "text",
+                            "text": {"content": github_url},
+                        }
+                    ]
+                }
+            else:
+                properties[GITHUB_PROPERTY_NAME] = {"url": github_url}
         if stars_count is not None:
             properties[GITHUB_STARS_PROPERTY_NAME] = {"number": stars_count}
         if not properties:
@@ -39,6 +50,44 @@ class NotionClient:
             try:
                 async with self.semaphore:
                     await self.client.pages.update(page_id=page_id, properties=properties)
+                return
+            except Exception as exc:
+                last_error = exc
+                if attempt >= NOTION_MAX_RETRIES:
+                    raise
+                await asyncio.sleep(0.5 * (2**attempt))
+
+        if last_error:
+            raise last_error
+
+    async def ensure_sync_properties(self, data_source_id: str) -> None:
+        async with self.semaphore:
+            data_source = await self.client.data_sources.retrieve(data_source_id=data_source_id)
+
+        properties = data_source.get("properties", {})
+        missing_properties = {}
+        if GITHUB_PROPERTY_NAME not in properties:
+            missing_properties[GITHUB_PROPERTY_NAME] = {
+                "type": "url",
+                "url": {},
+            }
+        if GITHUB_STARS_PROPERTY_NAME not in properties:
+            missing_properties[GITHUB_STARS_PROPERTY_NAME] = {
+                "type": "number",
+                "number": {"format": "number"},
+            }
+
+        if not missing_properties:
+            return
+
+        last_error = None
+        for attempt in range(NOTION_MAX_RETRIES + 1):
+            try:
+                async with self.semaphore:
+                    await self.client.data_sources.update(
+                        data_source_id=data_source_id,
+                        properties=missing_properties,
+                    )
                 return
             except Exception as exc:
                 last_error = exc
