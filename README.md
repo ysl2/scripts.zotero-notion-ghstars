@@ -4,17 +4,19 @@ One CLI, three modes:
 
 - No positional argument: sync GitHub links and star counts into Notion
 - One existing `.csv` file path: update that CSV in place
-- One supported papers collection URL: fetch the full result set and write a CSV under `./output`
+- One supported papers collection URL: fetch the full result set and write a CSV under `./output` in the current working directory
 
 Repository discovery for arXiv-backed papers now uses:
 
-- project-level cache in `./cache.db` first
+- shared `./cache.db` in the current working directory first
 - Hugging Face exact API `GET /api/papers/{arxiv_id}` on cache miss
 - no Hugging Face search fallback for GitHub repo discovery
 
 GitHub and star lookup use normalized, versionless arXiv URLs as the paper identity.
 
 ## Install
+
+Requires Python 3.12+.
 
 ```bash
 uv sync
@@ -32,7 +34,22 @@ HUGGINGFACE_TOKEN=
 HF_EXACT_NO_REPO_RECHECK_DAYS=7
 ```
 
-`cache.db` is created automatically at the project root and shared across URL, CSV, and Notion runs.
+`cache.db` is created automatically in the current working directory and shared across URL, CSV, and Notion runs.
+
+### Optional override only for Semantic Scholar URL mode
+
+Semantic Scholar search pages are rendered with a local Chrome binary in headless mode.
+
+Normally you do not need to configure anything on macOS if Chrome is installed at:
+
+- `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+
+`GOOGLE_CHROME_BIN` is only an override. Set it only if you want to force a specific Chrome binary, or if Chrome is installed outside the default macOS location.
+
+When set, `GOOGLE_CHROME_BIN` may be either:
+
+- an absolute path to the Chrome binary
+- a command name resolvable via `PATH`
 
 ### Required only for Notion mode
 
@@ -68,13 +85,14 @@ CSV mode behavior:
 - missing `Github` or `Stars` columns are added automatically at the end of the CSV
 - existing custom columns are left untouched, including any preexisting `Overview` / `Abs` columns
 - cached overview / abs markdown is fetched only when the cache file is missing
-- cached content is stored under `./cache/overview/<arxiv_id>.md` and `./cache/abs/<arxiv_id>.md`
+- cached content is stored on disk under `./cache/overview/<arxiv_id>.md` and `./cache/abs/<arxiv_id>.md` in the current working directory
+- the helper may return a path string relative to the CSV directory, but current CSV mode does not write those returned paths back into the CSV
 - overview uses AlphaXiv's public overview API; abs uses AlphaXiv's public paper API
 - writes use a temp file and atomic replace
 
 ### Collection URL to CSV mode
 
-Reads a supported collection URL and writes a CSV under `./output` by default.
+Reads a supported collection URL and writes a CSV under `./output` in the current working directory by default.
 
 Command shape:
 
@@ -198,7 +216,8 @@ URL mode behavior:
 
 - source-specific fetching is kept in separate adapters under `url_to_csv/`
 - every URL export appends a run timestamp in `YYYYMMDDHHMMSS` form before `.csv`
-- CLI URL exports default to `./output` and create that directory automatically if needed
+- CLI URL exports default to `./output` in the current working directory and create that directory automatically if needed
+- URL exports always write the standard columns: `Name`, `Url`, `Github`, `Stars`
 - standard arXiv `list/...` and `search/...` collection pages, including `/search/advanced`, are crawled across all pages, not just the first page
 - archive-style arXiv `list/<category>/YYYY-MM` pages reuse the same multi-page `list/...` crawling path
 - arXiv `new` pages include all visible sections, including new submissions, cross-lists, and replacements
@@ -207,6 +226,7 @@ URL mode behavior:
 - arXiv Xplorer uses the site’s paging API instead of trying to click `Show More` in a browser
 - Hugging Face Papers parses the collection page’s embedded papers payload from the frontend response
 - Semantic Scholar crawls the search result pages, then keeps only rows that can be normalized to canonical arXiv URLs
+- Semantic Scholar crawling requires a working local Chrome/Chromium binary as described above
 - all URL modes normalize rows to canonical, versionless arXiv URLs before downstream enrichment
 - rows that cannot be mapped to arXiv are dropped from the final CSV
 - repo discovery reuses the shared `cache.db` mapping of canonical arXiv URL to GitHub repo
