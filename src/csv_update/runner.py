@@ -9,8 +9,9 @@ from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient
 from src.shared.http import build_timeout
 from src.shared.progress import print_paper_progress, print_summary
+from src.shared.repo_cache import RepoCacheStore
 from src.shared.runtime import build_client, load_runtime_config
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT, REPO_CACHE_DB_PATH
 from src.shared.skip_reasons import is_minor_skip_reason
 
 
@@ -31,35 +32,40 @@ async def run_csv_mode(
         return 1
 
     config = load_runtime_config(dict(os.environ))
+    repo_cache = RepoCacheStore(REPO_CACHE_DB_PATH)
 
-    async with session_factory(timeout=build_timeout()) as session:
-        discovery_client = build_client(
-            discovery_client_cls,
-            session,
-            huggingface_token=config["huggingface_token"],
-            alphaxiv_token=config["alphaxiv_token"],
-            max_concurrent=CONCURRENT_LIMIT,
-            min_interval=REQUEST_DELAY,
-        )
-        github_client = build_client(
-            github_client_cls,
-            session,
-            github_token=config["github_token"],
-            max_concurrent=CONCURRENT_LIMIT,
-            min_interval=REQUEST_DELAY,
-        )
+    try:
+        async with session_factory(timeout=build_timeout()) as session:
+            discovery_client = build_client(
+                discovery_client_cls,
+                session,
+                huggingface_token=config["huggingface_token"],
+                alphaxiv_token=config["alphaxiv_token"],
+                repo_cache=repo_cache,
+                max_concurrent=CONCURRENT_LIMIT,
+                min_interval=REQUEST_DELAY,
+            )
+            github_client = build_client(
+                github_client_cls,
+                session,
+                github_token=config["github_token"],
+                max_concurrent=CONCURRENT_LIMIT,
+                min_interval=REQUEST_DELAY,
+            )
 
-        result = await update_csv_file(
-            csv_path,
-            discovery_client=discovery_client,
-            github_client=github_client,
-            status_callback=lambda message: print(message, flush=True),
-            progress_callback=lambda outcome, total: print_paper_progress(
-                outcome,
-                total,
-                is_minor_reason=is_minor_skip_reason,
-            ),
-        )
+            result = await update_csv_file(
+                csv_path,
+                discovery_client=discovery_client,
+                github_client=github_client,
+                status_callback=lambda message: print(message, flush=True),
+                progress_callback=lambda outcome, total: print_paper_progress(
+                    outcome,
+                    total,
+                    is_minor_reason=is_minor_skip_reason,
+                ),
+            )
+    finally:
+        repo_cache.close()
 
     print_summary(
         "Updated",

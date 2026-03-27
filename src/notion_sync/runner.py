@@ -11,7 +11,8 @@ from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient, resolve_github_min_interval
 from src.shared.http import build_timeout
 from src.shared.progress import Colors, colored, print_summary
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.repo_cache import RepoCacheStore
+from src.shared.settings import DEFAULT_CONCURRENT_LIMIT, REPO_CACHE_DB_PATH
 from src.shared.skip_reasons import is_minor_skip_reason
 
 
@@ -44,55 +45,60 @@ async def run_notion_mode(
     print(f"⚙️ Concurrency: GitHub={GITHUB_CONCURRENT_LIMIT}, Notion={NOTION_CONCURRENT_LIMIT}")
     print(f"⚙️ Request interval: general={REQUEST_DELAY}s, GitHub={github_request_delay}s")
     print()
+    repo_cache = RepoCacheStore(REPO_CACHE_DB_PATH)
 
-    async with session_factory(timeout=build_timeout()) as session:
-        arxiv_client = arxiv_client_cls(
-            session,
-            max_concurrent=ARXIV_CONCURRENT_LIMIT,
-            min_interval=REQUEST_DELAY,
-        )
-        discovery_client = discovery_client_cls(
-            session,
-            huggingface_token=config["huggingface_token"],
-            alphaxiv_token=config["alphaxiv_token"],
-            max_concurrent=DISCOVERY_CONCURRENT_LIMIT,
-            min_interval=REQUEST_DELAY,
-        )
-        github_client = github_client_cls(
-            session,
-            github_token=github_token,
-            max_concurrent=GITHUB_CONCURRENT_LIMIT,
-            min_interval=github_request_delay,
-        )
+    try:
+        async with session_factory(timeout=build_timeout()) as session:
+            arxiv_client = arxiv_client_cls(
+                session,
+                max_concurrent=ARXIV_CONCURRENT_LIMIT,
+                min_interval=REQUEST_DELAY,
+            )
+            discovery_client = discovery_client_cls(
+                session,
+                huggingface_token=config["huggingface_token"],
+                alphaxiv_token=config["alphaxiv_token"],
+                repo_cache=repo_cache,
+                max_concurrent=DISCOVERY_CONCURRENT_LIMIT,
+                min_interval=REQUEST_DELAY,
+            )
+            github_client = github_client_cls(
+                session,
+                github_token=github_token,
+                max_concurrent=GITHUB_CONCURRENT_LIMIT,
+                min_interval=github_request_delay,
+            )
 
-        async with notion_client_cls(config["notion_token"], NOTION_CONCURRENT_LIMIT) as notion_client:
-            data_source_id = await notion_client.get_data_source_id(config["database_id"])
-            if not data_source_id:
-                print(colored("❌ Unable to get data_source_id; check DATABASE_ID", Colors.RED))
-                return 1
+            async with notion_client_cls(config["notion_token"], NOTION_CONCURRENT_LIMIT) as notion_client:
+                data_source_id = await notion_client.get_data_source_id(config["database_id"])
+                if not data_source_id:
+                    print(colored("❌ Unable to get data_source_id; check DATABASE_ID", Colors.RED))
+                    return 1
 
-            print(f"📚 Data source ID: {data_source_id}")
+                print(f"📚 Data source ID: {data_source_id}")
 
-            pages = await notion_client.query_pages(data_source_id)
-            print(f"📝 Found {len(pages)} pages with Github field\n")
+                pages = await notion_client.query_pages(data_source_id)
+                print(f"📝 Found {len(pages)} pages with Github field\n")
 
-            results = {"updated": 0, "skipped": []}
-            lock = asyncio.Lock()
-            tasks = [
-                process_page(
-                    page,
-                    i,
-                    len(pages),
-                    discovery_client=discovery_client,
-                    github_client=github_client,
-                    notion_client=notion_client,
-                    results=results,
-                    lock=lock,
-                    arxiv_client=arxiv_client,
-                )
-                for i, page in enumerate(pages, 1)
-            ]
-            await asyncio.gather(*tasks)
+                results = {"updated": 0, "skipped": []}
+                lock = asyncio.Lock()
+                tasks = [
+                    process_page(
+                        page,
+                        i,
+                        len(pages),
+                        discovery_client=discovery_client,
+                        github_client=github_client,
+                        notion_client=notion_client,
+                        results=results,
+                        lock=lock,
+                        arxiv_client=arxiv_client,
+                    )
+                    for i, page in enumerate(pages, 1)
+                ]
+                await asyncio.gather(*tasks)
+    finally:
+        repo_cache.close()
 
     print_summary(
         "Updated",

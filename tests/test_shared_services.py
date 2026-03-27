@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -185,33 +186,20 @@ async def test_resolve_github_url_uses_huggingface_exact_api_payload_before_sear
 
 
 @pytest.mark.anyio
-async def test_resolve_github_url_falls_back_to_huggingface_search_api_with_limit_one_after_exact_api_miss():
+async def test_resolve_github_url_uses_cached_repo_before_hf_exact():
     class FakeDiscoveryClient:
         def __init__(self):
-            self.huggingface_token = "hf_token"
-            self.calls = []
+            self.repo_cache = SimpleNamespace(
+                get=lambda arxiv_url: SimpleNamespace(
+                    arxiv_url=arxiv_url,
+                    github_url="https://github.com/foo/bar",
+                    hf_exact_no_repo_count=0,
+                )
+            )
+            self.hf_exact_no_repo_threshold = 10
 
         async def get_huggingface_paper_payload_by_arxiv_id(self, arxiv_id):
-            self.calls.append(("hf_paper_api", arxiv_id))
-            return {"id": arxiv_id, "githubRepo": None}, None
-
-        async def get_huggingface_paper_search_results(self, title, *, limit=1):
-            self.calls.append(("hf_search_api", title, limit))
-            return [
-                {
-                    "paper": {
-                        "id": "2603.18493",
-                        "title": "Paper Title",
-                        "githubRepo": "https://github.com/foo/bar",
-                    }
-                }
-            ], None
-
-        async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id):
-            raise AssertionError("legacy Hugging Face HTML paper fetch should not run")
-
-        async def get_huggingface_search_html(self, title):
-            raise AssertionError("legacy Hugging Face HTML search should not run")
+            raise AssertionError("HF exact should not run when cache already has a repo")
 
     client = FakeDiscoveryClient()
     github_url = await resolve_github_url(
@@ -220,32 +208,23 @@ async def test_resolve_github_url_falls_back_to_huggingface_search_api_with_limi
     )
 
     assert github_url == "https://github.com/foo/bar"
-    assert client.calls == [
-        ("hf_paper_api", "2603.18493"),
-        ("hf_search_api", "Paper Title", 1),
-    ]
 
 
 @pytest.mark.anyio
-async def test_resolve_github_url_does_not_use_search_api_when_exact_api_errors():
+async def test_resolve_github_url_skips_hf_exact_when_cached_no_repo_reaches_threshold():
     class FakeDiscoveryClient:
         def __init__(self):
-            self.huggingface_token = "hf_token"
-            self.calls = []
+            self.repo_cache = SimpleNamespace(
+                get=lambda arxiv_url: SimpleNamespace(
+                    arxiv_url=arxiv_url,
+                    github_url=None,
+                    hf_exact_no_repo_count=10,
+                )
+            )
+            self.hf_exact_no_repo_threshold = 10
 
         async def get_huggingface_paper_payload_by_arxiv_id(self, arxiv_id):
-            self.calls.append(("hf_paper_api", arxiv_id))
-            return None, "Hugging Face Papers API timeout"
-
-        async def get_huggingface_paper_search_results(self, title, *, limit=1):
-            self.calls.append(("hf_search_api", title, limit))
-            raise AssertionError("search API should not run when exact API request errored")
-
-        async def get_huggingface_paper_html_by_arxiv_id(self, arxiv_id):
-            raise AssertionError("legacy Hugging Face HTML paper fetch should not run")
-
-        async def get_huggingface_search_html(self, title):
-            raise AssertionError("legacy Hugging Face HTML search should not run")
+            raise AssertionError("HF exact should not run once no-repo threshold is reached")
 
     client = FakeDiscoveryClient()
     github_url = await resolve_github_url(
@@ -254,9 +233,111 @@ async def test_resolve_github_url_does_not_use_search_api_when_exact_api_errors(
     )
 
     assert github_url is None
-    assert client.calls == [
-        ("hf_paper_api", "2603.18493"),
+
+
+@pytest.mark.anyio
+async def test_resolve_github_url_queries_hf_exact_when_cached_no_repo_is_below_threshold():
+    class FakeRepoCache:
+        def __init__(self):
+            self.found_calls = []
+            self.no_repo_calls = []
+
+        def get(self, arxiv_url):
+            return SimpleNamespace(
+                arxiv_url=arxiv_url,
+                github_url=None,
+                hf_exact_no_repo_count=9,
+            )
+
+        def record_found_repo(self, arxiv_url, github_url):
+            self.found_calls.append((arxiv_url, github_url))
+
+        def record_exact_no_repo(self, arxiv_url):
+            self.no_repo_calls.append(arxiv_url)
+
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+            self.calls = []
+            self.repo_cache = FakeRepoCache()
+            self.hf_exact_no_repo_threshold = 10
+
+        async def get_huggingface_paper_payload_by_arxiv_id(self, arxiv_id):
+            self.calls.append(("hf_paper_api", arxiv_id))
+            return {"id": arxiv_id, "githubRepo": "https://github.com/foo/bar"}, None
+
+    client = FakeDiscoveryClient()
+    github_url = await resolve_github_url(
+        FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
+        client,
+    )
+
+    assert github_url == "https://github.com/foo/bar"
+    assert client.calls == [("hf_paper_api", "2603.18493")]
+    assert client.repo_cache.found_calls == [
+        ("https://arxiv.org/abs/2603.18493", "https://github.com/foo/bar"),
     ]
+    assert client.repo_cache.no_repo_calls == []
+
+
+@pytest.mark.anyio
+async def test_resolve_github_url_records_successful_exact_no_repo_in_cache():
+    class FakeRepoCache:
+        def __init__(self):
+            self.no_repo_calls = []
+
+        def get(self, arxiv_url):
+            return None
+
+        def record_exact_no_repo(self, arxiv_url):
+            self.no_repo_calls.append(arxiv_url)
+
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+            self.repo_cache = FakeRepoCache()
+
+        async def get_huggingface_paper_payload_by_arxiv_id(self, arxiv_id):
+            return {"id": arxiv_id, "githubRepo": None}, None
+
+    client = FakeDiscoveryClient()
+    github_url = await resolve_github_url(
+        FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
+        client,
+    )
+
+    assert github_url is None
+    assert client.repo_cache.no_repo_calls == ["https://arxiv.org/abs/2603.18493"]
+
+
+@pytest.mark.anyio
+async def test_resolve_github_url_does_not_record_no_repo_when_exact_api_errors():
+    class FakeRepoCache:
+        def __init__(self):
+            self.no_repo_calls = []
+
+        def get(self, arxiv_url):
+            return None
+
+        def record_exact_no_repo(self, arxiv_url):
+            self.no_repo_calls.append(arxiv_url)
+
+    class FakeDiscoveryClient:
+        def __init__(self):
+            self.huggingface_token = "hf_token"
+            self.repo_cache = FakeRepoCache()
+
+        async def get_huggingface_paper_payload_by_arxiv_id(self, arxiv_id):
+            return None, "Hugging Face Papers API timeout"
+
+    client = FakeDiscoveryClient()
+    github_url = await resolve_github_url(
+        FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
+        client,
+    )
+
+    assert github_url is None
+    assert client.repo_cache.no_repo_calls == []
 
 
 @pytest.mark.anyio
@@ -439,7 +520,7 @@ async def test_rate_limiter_allows_multiple_waiters_to_sleep_without_holding_loc
 
 
 @pytest.mark.anyio
-async def test_resolve_github_url_uses_search_api_when_exact_api_returns_404():
+async def test_resolve_github_url_returns_none_when_exact_api_returns_404():
     class FakeDiscoveryClient:
         def __init__(self):
             self.huggingface_token = "hf_token"
@@ -449,18 +530,13 @@ async def test_resolve_github_url_uses_search_api_when_exact_api_returns_404():
             self.calls.append(("hf_paper_api", arxiv_id))
             return None, None
 
-        async def get_huggingface_paper_search_results(self, title, *, limit=1):
-            self.calls.append(("hf_search_api", title, limit))
-            return [{"paper": {"id": "2603.18493", "githubRepo": "https://github.com/foo/bar"}}], None
-
     client = FakeDiscoveryClient()
     github_url = await resolve_github_url(
         FakeSeed(name="Paper Title", url="https://arxiv.org/abs/2603.18493"),
         client,
     )
 
-    assert github_url == "https://github.com/foo/bar"
+    assert github_url is None
     assert client.calls == [
         ("hf_paper_api", "2603.18493"),
-        ("hf_search_api", "Paper Title", 1),
     ]
