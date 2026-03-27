@@ -15,6 +15,7 @@ def test_load_runtime_config_reads_only_optional_tokens():
     assert config == {
         "github_token": "gh_token",
         "huggingface_token": "hf_token",
+        "openalex_api_key": "",
         "hf_exact_no_repo_recheck_days": 7,
     }
 
@@ -23,12 +24,23 @@ def test_load_runtime_config_defaults_missing_values_to_empty_strings():
     assert load_runtime_config({}) == {
         "github_token": "",
         "huggingface_token": "",
+        "openalex_api_key": "",
         "hf_exact_no_repo_recheck_days": 7,
     }
 
 
 def test_load_runtime_config_falls_back_to_default_recheck_days_for_invalid_value():
     assert load_runtime_config({"HF_EXACT_NO_REPO_RECHECK_DAYS": "abc"})["hf_exact_no_repo_recheck_days"] == 7
+
+
+def test_load_runtime_config_reads_optional_openalex_token():
+    config = load_runtime_config(
+        {
+            "OPENALEX_API_KEY": "oa_key",
+        }
+    )
+
+    assert config["openalex_api_key"] == "oa_key"
 
 
 @pytest.mark.anyio

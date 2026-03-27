@@ -19,6 +19,7 @@ def load_runtime_config(env: dict[str, str]) -> dict[str, str | int]:
     return {
         "github_token": (env.get("GITHUB_TOKEN") or "").strip(),
         "huggingface_token": (env.get("HUGGINGFACE_TOKEN") or "").strip(),
+        "openalex_api_key": (env.get("OPENALEX_API_KEY") or "").strip(),
         "hf_exact_no_repo_recheck_days": _parse_positive_int(
             env.get("HF_EXACT_NO_REPO_RECHECK_DAYS"),
             default=HF_EXACT_NO_REPO_RECHECK_DAYS,

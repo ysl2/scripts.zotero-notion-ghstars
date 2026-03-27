@@ -186,6 +186,50 @@ async def test_async_main_runs_url_mode_when_given_supported_arxiv_advanced_sear
 
 
 @pytest.mark.anyio
+async def test_async_main_routes_arxiv_abs_urls_to_relations_mode(monkeypatch):
+    input_url = "https://arxiv.org/abs/2603.23502"
+
+    notion_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    arxiv_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(app, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(app, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(app, "run_url_mode", url_runner, raising=False)
+    monkeypatch.setattr(app, "run_arxiv_relations_mode", arxiv_runner)
+
+    exit_code = await app.async_main([input_url])
+
+    assert exit_code == 0
+    notion_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
+    arxiv_runner.assert_awaited_once_with(input_url)
+
+
+@pytest.mark.anyio
+async def test_async_main_routes_arxiv_pdf_urls_to_relations_mode(monkeypatch):
+    input_url = "https://arxiv.org/pdf/2603.23502.pdf"
+
+    notion_runner = AsyncMock(return_value=0)
+    csv_runner = AsyncMock(return_value=0)
+    url_runner = AsyncMock(return_value=0)
+    arxiv_runner = AsyncMock(return_value=0)
+    monkeypatch.setattr(app, "run_notion_mode", notion_runner)
+    monkeypatch.setattr(app, "run_csv_mode", csv_runner)
+    monkeypatch.setattr(app, "run_url_mode", url_runner, raising=False)
+    monkeypatch.setattr(app, "run_arxiv_relations_mode", arxiv_runner)
+
+    exit_code = await app.async_main([input_url])
+
+    assert exit_code == 0
+    notion_runner.assert_not_awaited()
+    csv_runner.assert_not_awaited()
+    url_runner.assert_not_awaited()
+    arxiv_runner.assert_awaited_once_with(input_url)
+
+
+@pytest.mark.anyio
 async def test_async_main_runs_url_mode_when_given_supported_huggingface_papers_url(monkeypatch):
     input_url = "https://huggingface.co/papers/trending?q=semantic"
 
