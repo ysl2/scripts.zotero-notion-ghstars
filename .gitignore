@@ -2,6 +2,7 @@
 __pycache__/
 .worktrees/
 output/
+cache/
 cache.db
 *.html
 *.csv

@@ -12,7 +12,9 @@ NAME_COLUMN = "Name"
 URL_COLUMN = "Url"
 GITHUB_COLUMN = "Github"
 STARS_COLUMN = "Stars"
-REQUIRED_COLUMNS = (GITHUB_COLUMN, STARS_COLUMN)
+OVERVIEW_COLUMN = "Overview"
+ABS_COLUMN = "Abs"
+MANAGED_COLUMNS = (GITHUB_COLUMN, STARS_COLUMN, OVERVIEW_COLUMN, ABS_COLUMN)
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ async def update_csv_file(
     *,
     discovery_client,
     github_client,
+    content_cache=None,
     status_callback=None,
     progress_callback=None,
 ) -> CsvUpdateResult:
@@ -53,6 +56,8 @@ async def update_csv_file(
                 row,
                 discovery_client=discovery_client,
                 github_client=github_client,
+                content_cache=content_cache,
+                csv_dir=csv_path.parent,
             )
         )
         for index, row in enumerate(rows, 1)
@@ -89,6 +94,8 @@ async def build_csv_row_outcome(
     *,
     discovery_client,
     github_client,
+    content_cache,
+    csv_dir: Path,
 ) -> tuple[int, dict[str, str], CsvRowOutcome]:
     updated_row = dict(row)
     name = (updated_row.get(NAME_COLUMN) or "").strip() or f"Row {index}"
@@ -96,13 +103,32 @@ async def build_csv_row_outcome(
     existing_github = updated_row.get(GITHUB_COLUMN, "") or ""
     current_stars = parse_current_stars(updated_row.get(STARS_COLUMN))
 
-    enrichment = await enrich_paper(
-        name=name,
-        url=url,
-        existing_github=existing_github,
-        discovery_client=discovery_client,
-        github_client=github_client,
+    enrichment_task = asyncio.create_task(
+        enrich_paper(
+            name=name,
+            url=url,
+            existing_github=existing_github,
+            discovery_client=discovery_client,
+            github_client=github_client,
+        )
     )
+    overview_task = asyncio.create_task(
+        _ensure_content_path(
+            content_cache,
+            kind="overview",
+            url=url,
+            relative_to=csv_dir,
+        )
+    )
+    abs_task = asyncio.create_task(
+        _ensure_content_path(
+            content_cache,
+            kind="abs",
+            url=url,
+            relative_to=csv_dir,
+        )
+    )
+    enrichment, overview_path, abs_path = await asyncio.gather(enrichment_task, overview_task, abs_task)
 
     if enrichment.url and enrichment.url != url and enrichment.reason != "No valid arXiv URL found":
         updated_row[URL_COLUMN] = enrichment.url
@@ -112,6 +138,10 @@ async def build_csv_row_outcome(
 
     if enrichment.reason is None and enrichment.stars is not None:
         updated_row[STARS_COLUMN] = str(enrichment.stars)
+    if overview_path:
+        updated_row[OVERVIEW_COLUMN] = overview_path
+    if abs_path:
+        updated_row[ABS_COLUMN] = abs_path
 
     github_url_set = None
     source_label = None
@@ -157,12 +187,9 @@ def _read_csv_rows(csv_path: Path) -> tuple[list[dict[str, str]], list[str]]:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
             raise ValueError("CSV file must include a header row")
-        fieldnames = list(reader.fieldnames)
+        fieldnames = _normalize_fieldnames(list(reader.fieldnames))
         if URL_COLUMN not in fieldnames:
             raise ValueError("CSV file must include Url column")
-        for column in REQUIRED_COLUMNS:
-            if column not in fieldnames:
-                fieldnames.append(column)
 
         rows = []
         for raw_row in reader:
@@ -179,3 +206,28 @@ def _write_csv_rows(csv_path: Path, fieldnames: list[str], rows: list[dict[str, 
         temp_path = Path(handle.name)
 
     temp_path.replace(csv_path)
+
+
+def _normalize_fieldnames(fieldnames: list[str]) -> list[str]:
+    if URL_COLUMN not in fieldnames:
+        return fieldnames
+
+    managed_indices = [index for index, name in enumerate(fieldnames) if name in MANAGED_COLUMNS]
+    insert_at = min(managed_indices) if managed_indices else len(fieldnames)
+    base_fieldnames = [name for name in fieldnames if name not in MANAGED_COLUMNS]
+    return base_fieldnames[:insert_at] + list(MANAGED_COLUMNS) + base_fieldnames[insert_at:]
+
+
+async def _ensure_content_path(content_cache, *, kind: str, url: str, relative_to: Path) -> str:
+    if content_cache is None:
+        return ""
+
+    method_name = "ensure_overview_path" if kind == "overview" else "ensure_abs_path"
+    method = getattr(content_cache, method_name, None)
+    if not callable(method):
+        return ""
+
+    try:
+        return await method(url, relative_to=relative_to)
+    except Exception:
+        return ""

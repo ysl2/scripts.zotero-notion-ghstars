@@ -5,11 +5,13 @@ from pathlib import Path
 import aiohttp
 
 from src.csv_update.pipeline import update_csv_file
+from src.shared.alphaxiv_content import AlphaXivContentClient
 from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient
+from src.shared.paper_content import PaperContentCache
 from src.shared.progress import print_paper_progress, print_summary
-from src.shared.runtime import load_runtime_config, open_runtime_clients
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.runtime import build_client, load_runtime_config, open_runtime_clients
+from src.shared.settings import CONTENT_CACHE_DIR, DEFAULT_CONCURRENT_LIMIT
 from src.shared.skip_reasons import is_minor_skip_reason
 
 
@@ -23,6 +25,8 @@ async def run_csv_mode(
     session_factory=aiohttp.ClientSession,
     discovery_client_cls=DiscoveryClient,
     github_client_cls=GitHubClient,
+    content_client_cls=AlphaXivContentClient,
+    content_cache_root: Path | str | None = None,
 ) -> int:
     csv_path = Path(csv_path).expanduser()
     if not csv_path.exists() or not csv_path.is_file():
@@ -38,10 +42,21 @@ async def run_csv_mode(
         concurrent_limit=CONCURRENT_LIMIT,
         request_delay=REQUEST_DELAY,
     ) as runtime:
+        content_client = build_client(
+            content_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        content_cache = PaperContentCache(
+            cache_root=Path(content_cache_root) if content_cache_root is not None else Path(CONTENT_CACHE_DIR),
+            content_client=content_client,
+        )
         result = await update_csv_file(
             csv_path,
             discovery_client=runtime.discovery_client,
             github_client=runtime.github_client,
+            content_cache=content_cache,
             status_callback=lambda message: print(message, flush=True),
             progress_callback=lambda outcome, total: print_paper_progress(
                 outcome,

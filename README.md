@@ -65,7 +65,13 @@ CSV mode behavior:
 - requires `Url`; `Name` is optional
 - if `Github` is already present and valid, only `Stars` is refreshed
 - if `Github` is blank, discovery checks `cache.db` first, then does one Hugging Face exact lookup on cache miss
-- missing `Github` or `Stars` columns are appended automatically
+- missing `Github`, `Stars`, `Overview`, and `Abs` columns are added automatically
+- `Overview` and `Abs` are inserted after `Github` / `Stars`
+- `Overview` stores a relative path to a cached markdown file under `./cache/overview/<arxiv_id>.md`
+- `Abs` stores a relative path to a cached markdown file under `./cache/abs/<arxiv_id>.md`
+- the path written into the CSV is relative to that CSV file's directory
+- cached overview / abs markdown is fetched only when the cache file is missing
+- overview uses AlphaXiv's public overview API; abs uses AlphaXiv's public paper API
 - writes use a temp file and atomic replace
 
 ### Collection URL to CSV mode
@@ -246,7 +252,7 @@ Notion page updates still target the original page id; only the paper-identity p
 - Unsupported URLs fail instead of falling back to another mode
 - More than one positional argument is treated as a usage error
 - Concurrency and rate limiting remain enabled in all modes
-- `cache.db`, `*.html`, and `*.csv` are gitignored globally; use `git add -f` only if you intentionally want to track one
+- `cache/`, `cache.db`, `*.html`, and `*.csv` are gitignored globally; use `git add -f` only if you intentionally want to track one
 
 ## Tests
 
