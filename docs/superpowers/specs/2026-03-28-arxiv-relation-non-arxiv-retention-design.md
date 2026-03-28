@@ -88,6 +88,14 @@ When multiple related works collapse to the same final identity, the winner must
 
 This precedence rule is especially important when a directly arXiv-backed work and a title-mapped work resolve to the same canonical arXiv URL. In that case, the directly normalized row must win.
 
+If multiple rows still collide after applying normalization-strength precedence because they have the same strength and the same final identity, the winner must be selected deterministically by title, not by iteration order:
+
+- compare candidate titles using normalized title text
+- choose the lexicographically smallest normalized title
+- preserve the original title text of the winning row in the final CSV
+
+This same-strength tie-break applies to unresolved non-arXiv rows that collapse to the same retained URL as well as any same-strength arXiv-resolved collisions.
+
 This avoids exporting duplicate rows when one related work is directly arXiv-backed and another equivalent OpenAlex record only resolves through title search.
 
 **CSV Semantics**
@@ -103,7 +111,7 @@ Field semantics:
 
 - directly normalized arXiv rows keep their directly resolved arXiv identity and title
 - mapped-to-arXiv rows use the matched arXiv title and canonical arXiv URL
-- unresolved non-arXiv rows use the original OpenAlex title and the fallback URL chosen by the priority rule above
+- unresolved non-arXiv rows use the winning original OpenAlex title after the deterministic tie-break above and the fallback URL chosen by the priority rule above
 - `Github` and `Stars` remain blank when discovery cannot identify a repository
 
 This preserves compatibility with downstream CSV consumers.
