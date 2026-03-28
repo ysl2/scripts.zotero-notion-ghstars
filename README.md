@@ -256,6 +256,12 @@ Accepted URL shapes:
 - `https://arxiv.org/pdf/<arxiv-id>.pdf`
 - `https://www.arxiv.org/pdf/<arxiv-id>.pdf`
 
+Input normalization notes:
+
+- version suffixes such as `v4` are accepted and normalized away in downstream arXiv URLs and output filenames
+- trailing slash, query string, or fragment on a supported single-paper arXiv URL is ignored for normalization
+- collection pages such as `list/...`, `search/...`, and `catchup/...` are rejected by this mode
+
 Examples:
 
 ```bash
@@ -270,6 +276,17 @@ Output example:
 
 - `./output/arxiv-2603.23502-references-20260326113045.csv`
 - `./output/arxiv-2603.23502-citations-20260326113045.csv`
+
+Single-paper mode behavior:
+
+- resolves the input paper title from arXiv metadata first, then searches OpenAlex by title
+- accepts the first OpenAlex work returned by relevance order
+- keeps only related works that normalize to canonical, versionless arXiv `abs` URLs
+- referenced and citing works are deduplicated by canonical arXiv URL before export
+- both CSVs use the standard columns: `Name`, `Url`, `Github`, `Stars`
+- shared GitHub discovery and star enrichment are reused, so rows remain in the CSV even when no repo is found; in that case `Github` and `Stars` are left blank
+- a missing OpenAlex detail record for one referenced work currently causes that one related work to be skipped while the rest of the export continues
+- the CLI reports success only after both CSV files are written; other arXiv or OpenAlex hard failures still return a nonzero exit code
 
 ## Notion expectations
 
