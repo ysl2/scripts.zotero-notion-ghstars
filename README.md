@@ -35,6 +35,8 @@ HUGGINGFACE_TOKEN=
 HF_EXACT_NO_REPO_RECHECK_DAYS=7
 ```
 
+`HUGGINGFACE_TOKEN` enables both Hugging Face exact repo discovery and the optional single-paper relation-mode title-search fallback.
+
 `cache.db` is created automatically in the current working directory and shared across URL, CSV, and Notion runs.
 
 ### Optional only for single-paper arXiv relation mode
@@ -285,11 +287,13 @@ Single-paper mode behavior:
 - resolves the input paper title from arXiv metadata first, then searches OpenAlex by title
 - accepts the first OpenAlex work returned by relevance order
 - keeps direct arXiv-backed related works as canonical, versionless arXiv `abs` rows
-- otherwise tries arXiv title search and takes the first most relevant hit
+- otherwise tries arXiv API title search first and takes the first most relevant hit
+- after an arXiv API title-search miss, may try Hugging Face Papers title search when `HUGGINGFACE_TOKEN` is configured
 - mapped rows use the matched arXiv title and canonical arXiv `abs` URL
+- when `HUGGINGFACE_TOKEN` is absent, the Hugging Face fallback is skipped silently and unresolved rows keep the current retained-row behavior
 - if still unresolved, keeps the non-arXiv row with `Url` priority `DOI > landing page > OpenAlex URL`
 - relation normalization reuses `./cache.db` to cache non-direct relation resolution by OpenAlex work URL and DOI
-- cached positive matches store canonical arXiv `abs` URLs; cached negative matches are retried after `ARXIV_RELATION_NO_ARXIV_RECHECK_DAYS`
+- cached positive matches store canonical arXiv `abs` URLs; cached negative matches are written only after the active relation-resolution ladder for the current environment confirms no accepted arXiv match, then retried after `ARXIV_RELATION_NO_ARXIV_RECHECK_DAYS`
 - referenced and citing works are deduplicated by final normalized URL before export
 - both CSVs use the standard columns: `Name`, `Url`, `Github`, `Stars`
 - shared GitHub discovery and star enrichment are reused, so resolved and unresolved rows remain in the CSV even when no repo is found; in that case `Github` and `Stars` are left blank
