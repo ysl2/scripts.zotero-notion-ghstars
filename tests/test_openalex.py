@@ -68,6 +68,44 @@ def test_ignores_related_work_without_arxiv_metadata():
     assert client.normalize_related_work(work) is None
 
 
+def test_build_related_work_candidate_prefers_direct_arxiv_identity():
+    session = FakeSession([])
+    client = OpenAlexClient(session, min_interval=0)
+    work = {
+        "display_name": "Direct Paper",
+        "ids": {"arxiv": "2403.00001v2"},
+        "doi": "https://doi.org/10.48550/arXiv.2403.00001",
+        "locations": [{"landing_page_url": "https://example.com/direct"}],
+        "id": "https://openalex.org/W1",
+    }
+
+    candidate = client.build_related_work_candidate(work)
+
+    assert candidate.title == "Direct Paper"
+    assert candidate.direct_arxiv_url == "https://arxiv.org/abs/2403.00001"
+    assert candidate.doi_url == "https://doi.org/10.48550/arXiv.2403.00001"
+    assert candidate.landing_page_url == "https://example.com/direct"
+    assert candidate.openalex_url == "https://openalex.org/W1"
+
+
+def test_build_related_work_candidate_retains_non_arxiv_fallback_fields():
+    session = FakeSession([])
+    client = OpenAlexClient(session, min_interval=0)
+    work = {
+        "display_name": "Non Arxiv Paper",
+        "doi": "https://doi.org/10.1145/example",
+        "locations": [{"landing_page_url": "https://publisher.example/paper"}],
+        "id": "https://openalex.org/W9",
+    }
+
+    candidate = client.build_related_work_candidate(work)
+
+    assert candidate.direct_arxiv_url is None
+    assert candidate.doi_url == "https://doi.org/10.1145/example"
+    assert candidate.landing_page_url == "https://publisher.example/paper"
+    assert candidate.openalex_url == "https://openalex.org/W9"
+
+
 @pytest.mark.anyio
 async def test_references_hydrate_from_referenced_work_ids():
     responses = [

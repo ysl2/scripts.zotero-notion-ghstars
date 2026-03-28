@@ -1,5 +1,6 @@
 import asyncio
 import re
+from dataclasses import dataclass
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
@@ -15,6 +16,23 @@ OPENALEX_SEARCH_PAGE_SIZE = 5
 OPENALEX_CITED_BY_PAGE_SIZE = 200
 OPENALEX_RETRY_STATUSES = {429, 500, 502, 503, 504}
 ARXIV_DOI_PATTERN = re.compile(r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5})(?:v\d+)?", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class RelatedWorkCandidate:
+    title: str
+    direct_arxiv_url: str | None
+    doi_url: str | None
+    landing_page_url: str | None
+    openalex_url: str
+
+
+def _normalize_doi_url(doi: Any) -> str | None:
+    if not isinstance(doi, str):
+        return None
+
+    normalized = doi.strip()
+    return normalized or None
 
 
 class OpenAlexClient:
@@ -72,13 +90,22 @@ class OpenAlexClient:
 
         return citations
 
+    def build_related_work_candidate(self, work: dict[str, Any]) -> RelatedWorkCandidate:
+        return RelatedWorkCandidate(
+            title=work.get("display_name") or work.get("title") or "",
+            direct_arxiv_url=self._canonical_arxiv_url(work),
+            doi_url=_normalize_doi_url(work.get("doi")),
+            landing_page_url=self._extract_landing_page_url(work),
+            openalex_url=work.get("id") or "",
+        )
+
     def normalize_related_work(self, work: dict[str, Any]) -> PaperSeed | None:
-        canonical = self._canonical_arxiv_url(work)
-        if not canonical:
+        candidate = self.build_related_work_candidate(work)
+        if not candidate.direct_arxiv_url:
             return None
 
-        name = work.get("display_name") or work.get("title") or canonical
-        return PaperSeed(name=name, url=canonical)
+        name = candidate.title or candidate.direct_arxiv_url
+        return PaperSeed(name=name, url=candidate.direct_arxiv_url)
 
     async def _get_json(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
         for attempt in range(MAX_RETRIES + 1):
@@ -160,6 +187,23 @@ class OpenAlexClient:
         if not match:
             return None
         return match.group(1)
+
+    @staticmethod
+    def _extract_landing_page_url(work: dict[str, Any]) -> str | None:
+        locations = work.get("locations") or []
+        for location in locations:
+            if not isinstance(location, dict):
+                continue
+
+            landing_page_url = location.get("landing_page_url")
+            if not isinstance(landing_page_url, str):
+                continue
+
+            normalized = landing_page_url.strip()
+            if normalized:
+                return normalized
+
+        return None
 
     @staticmethod
     def _unique_work_ids(values: Iterable[str | None]) -> list[str]:
