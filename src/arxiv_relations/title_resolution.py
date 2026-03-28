@@ -97,7 +97,7 @@ async def resolve_related_work_title_to_arxiv(
     if not getattr(discovery_client, "huggingface_token", "") or not callable(hf_search):
         return RelationTitleResolution(arxiv_url=None, resolved_title=None, negative_cacheable=False)
 
-    search_results, hf_error = await hf_search(title, limit=3)
+    search_results, hf_error = await hf_search(title, limit=1)
     if hf_error or search_results is None:
         return RelationTitleResolution(arxiv_url=None, resolved_title=None, negative_cacheable=False)
 

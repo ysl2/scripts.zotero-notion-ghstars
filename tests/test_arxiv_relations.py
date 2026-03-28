@@ -486,7 +486,7 @@ async def test_normalize_related_works_uses_hf_fallback_after_arxiv_api_miss():
     class FakeDiscoveryClient:
         huggingface_token = "hf-token"
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             events.append(("hf_search_json", title, limit))
             return (
                 [
@@ -527,7 +527,7 @@ async def test_normalize_related_works_uses_hf_fallback_after_arxiv_api_miss():
     ]
     assert events == [
         ("arxiv_api_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting"),
-        ("hf_search_json", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting", 3),
+        ("hf_search_json", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting", 1),
         ("title_lookup", "2312.00451"),
         ("cache_record", "openalex_work", "https://openalex.org/WFSGS", "https://arxiv.org/abs/2312.00451"),
         ("cache_record", "doi", "https://doi.org/10.1007/978-3-031-72933-1_9", "https://arxiv.org/abs/2312.00451"),
@@ -561,7 +561,7 @@ async def test_normalize_related_works_skips_hf_fallback_when_token_missing():
     class FakeDiscoveryClient:
         huggingface_token = ""
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             raise AssertionError("HF fallback should be skipped when token is missing")
 
     cache = FakeRelationResolutionCache()
@@ -610,7 +610,7 @@ async def test_normalize_related_works_does_not_negative_cache_transient_hf_fail
     class FakeDiscoveryClient:
         huggingface_token = "hf-token"
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             return None, "Hugging Face Papers timeout"
 
     cache = FakeRelationResolutionCache()
@@ -659,7 +659,7 @@ async def test_normalize_related_works_does_not_negative_cache_unparseable_hf_pa
     class FakeDiscoveryClient:
         huggingface_token = "hf-token"
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             return {"unexpected": "payload"}, None
 
     cache = FakeRelationResolutionCache()
@@ -708,7 +708,7 @@ async def test_normalize_related_works_does_not_negative_cache_malformed_hf_sear
     class FakeDiscoveryClient:
         huggingface_token = "hf-token"
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             return [
                 {"paper": {"title": "FSGS: Real-Time Few-shot View Synthesis using Gaussian Splatting"}},
                 {"paper": {"id": "2312.00451"}},
@@ -760,7 +760,7 @@ async def test_normalize_related_works_does_not_negative_cache_when_hf_title_pay
     class FakeDiscoveryClient:
         huggingface_token = "hf-token"
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             return [
                 {
                     "paper": {
@@ -844,7 +844,7 @@ async def test_normalize_related_works_negative_caches_only_after_arxiv_and_hf_b
     ]
     assert events == [
         ("arxiv_api_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting"),
-        ("hf_search_json_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting", 3),
+        ("hf_search_json_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting", 1),
         ("cache_record", "openalex_work", "https://openalex.org/WFSGS", None),
         ("cache_record", "doi", "https://doi.org/10.1007/978-3-031-72933-1_9", None),
     ]
@@ -1266,7 +1266,7 @@ async def test_export_arxiv_relations_to_csv_uses_hf_fallback_for_unresolved_rel
     class FakeDiscoveryClient:
         huggingface_token = "hf-token"
 
-        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 3):
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
             events.append(("hf_search_json", title, limit))
             payload_by_title = {
                 "Reference Needs HF Mapping": [
@@ -1324,8 +1324,8 @@ async def test_export_arxiv_relations_to_csv_uses_hf_fallback_for_unresolved_rel
         "2312.00452",
     ]
     assert events == [
-        ("hf_search_json", "Reference Needs HF Mapping", 3),
-        ("hf_search_json", "Citation Needs HF Mapping", 3),
+        ("hf_search_json", "Reference Needs HF Mapping", 1),
+        ("hf_search_json", "Citation Needs HF Mapping", 1),
     ]
 
     assert [call["seeds"] for call in export_calls] == [
