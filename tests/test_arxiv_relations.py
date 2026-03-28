@@ -455,6 +455,240 @@ async def test_normalize_related_works_does_not_negative_cache_api_request_failu
 
 
 @pytest.mark.anyio
+async def test_normalize_related_works_uses_hf_fallback_after_arxiv_api_miss():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    events: list[tuple] = []
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1007/978-3-031-72933-1_9",
+                landing_page_url="https://publisher.example/fsgs",
+                openalex_url="https://openalex.org/WFSGS",
+            )
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            events.append(("arxiv_api_miss", title))
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            events.append(("title_lookup", arxiv_identifier))
+            assert arxiv_identifier == "2312.00451"
+            return "FSGS: Real-Time Few-shot View Synthesis using Gaussian Splatting", None
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_search_html(self, title: str):
+            events.append(("hf_search", title))
+            return (
+                """
+                <div data-target="DailyPapers" data-props="{&quot;searchResults&quot;:[{&quot;paper&quot;:{&quot;id&quot;:&quot;2312.00451&quot;},&quot;title&quot;:&quot;FSGS: Real-Time Few-shot View Synthesis using Gaussian Splatting&quot;}]}"></div>
+                """,
+                None,
+            )
+
+    class TrackingRelationResolutionCache(FakeRelationResolutionCache):
+        def record_resolution(self, *, key_type: str, key_value: str, arxiv_url: str | None) -> None:
+            events.append(("cache_record", key_type, key_value, arxiv_url))
+            super().record_resolution(key_type=key_type, key_value=key_value, arxiv_url=arxiv_url)
+
+    cache = TrackingRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R1"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [
+        PaperSeed(
+            name="FSGS: Real-Time Few-shot View Synthesis using Gaussian Splatting",
+            url="https://arxiv.org/abs/2312.00451",
+        )
+    ]
+    assert cache.record_calls == [
+        ("openalex_work", "https://openalex.org/WFSGS", "https://arxiv.org/abs/2312.00451"),
+        ("doi", "https://doi.org/10.1007/978-3-031-72933-1_9", "https://arxiv.org/abs/2312.00451"),
+    ]
+    assert events == [
+        ("arxiv_api_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting"),
+        ("hf_search", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting"),
+        ("title_lookup", "2312.00451"),
+        ("cache_record", "openalex_work", "https://openalex.org/WFSGS", "https://arxiv.org/abs/2312.00451"),
+        ("cache_record", "doi", "https://doi.org/10.1007/978-3-031-72933-1_9", "https://arxiv.org/abs/2312.00451"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_normalize_related_works_skips_hf_fallback_when_token_missing():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1007/978-3-031-72933-1_9",
+                landing_page_url="https://publisher.example/fsgs",
+                openalex_url="https://openalex.org/WFSGS",
+            )
+
+    class FakeNoMatchArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("No title lookup should run after a full miss")
+
+    class FakeDiscoveryClient:
+        huggingface_token = ""
+
+        async def get_huggingface_search_html(self, title: str):
+            raise AssertionError("HF fallback should be skipped when token is missing")
+
+    cache = FakeRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R1"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeNoMatchArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [
+        PaperSeed(
+            name="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+            url="https://doi.org/10.1007/978-3-031-72933-1_9",
+        )
+    ]
+    assert cache.record_calls == []
+
+
+@pytest.mark.anyio
+async def test_normalize_related_works_does_not_negative_cache_transient_hf_failures():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1007/978-3-031-72933-1_9",
+                landing_page_url="https://publisher.example/fsgs",
+                openalex_url="https://openalex.org/WFSGS",
+            )
+
+    class FakeNoMatchArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("No title lookup should run after a full miss")
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_search_html(self, title: str):
+            return None, "Hugging Face Papers timeout"
+
+    cache = FakeRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R1"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeNoMatchArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [
+        PaperSeed(
+            name="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+            url="https://doi.org/10.1007/978-3-031-72933-1_9",
+        )
+    ]
+    assert cache.record_calls == []
+
+
+@pytest.mark.anyio
+async def test_normalize_related_works_negative_caches_only_after_arxiv_and_hf_both_miss():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    events: list[tuple] = []
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1007/978-3-031-72933-1_9",
+                landing_page_url="https://publisher.example/fsgs",
+                openalex_url="https://openalex.org/WFSGS",
+            )
+
+    class FakeNoMatchArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            events.append(("arxiv_api_miss", title))
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("No title lookup should run after a full miss")
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_search_html(self, title: str):
+            events.append(("hf_search_miss", title))
+            return '<div data-target="DailyPapers" data-props="{&quot;searchResults&quot;:[]}"></div>', None
+
+    class TrackingRelationResolutionCache(FakeRelationResolutionCache):
+        def record_resolution(self, *, key_type: str, key_value: str, arxiv_url: str | None) -> None:
+            events.append(("cache_record", key_type, key_value, arxiv_url))
+            super().record_resolution(key_type=key_type, key_value=key_value, arxiv_url=arxiv_url)
+
+    cache = TrackingRelationResolutionCache()
+    await normalize_related_works_to_seeds(
+        [{"id": "R1"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeNoMatchArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert cache.record_calls == [
+        ("openalex_work", "https://openalex.org/WFSGS", None),
+        ("doi", "https://doi.org/10.1007/978-3-031-72933-1_9", None),
+    ]
+    assert events == [
+        ("arxiv_api_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting"),
+        ("hf_search_miss", "FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting"),
+        ("cache_record", "openalex_work", "https://openalex.org/WFSGS", None),
+        ("cache_record", "doi", "https://doi.org/10.1007/978-3-031-72933-1_9", None),
+    ]
+
+
+@pytest.mark.anyio
 async def test_normalize_related_works_rechecks_stale_negative_and_backfills_all_keys():
     from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
 
