@@ -3,14 +3,20 @@ from dataclasses import dataclass
 import inspect
 
 from src.shared.http import build_timeout
+from src.shared.relation_resolution_cache import RelationResolutionCacheStore
 from src.shared.repo_cache import RepoCacheStore
-from src.shared.settings import HF_EXACT_NO_REPO_RECHECK_DAYS, REPO_CACHE_DB_PATH
+from src.shared.settings import (
+    ARXIV_RELATION_NO_ARXIV_RECHECK_DAYS,
+    HF_EXACT_NO_REPO_RECHECK_DAYS,
+    REPO_CACHE_DB_PATH,
+)
 
 
 @dataclass(frozen=True)
 class RuntimeClients:
     session: object
     repo_cache: RepoCacheStore
+    relation_resolution_cache: RelationResolutionCacheStore
     discovery_client: object
     github_client: object
 
@@ -20,6 +26,10 @@ def load_runtime_config(env: dict[str, str]) -> dict[str, str | int]:
         "github_token": (env.get("GITHUB_TOKEN") or "").strip(),
         "huggingface_token": (env.get("HUGGINGFACE_TOKEN") or "").strip(),
         "openalex_api_key": (env.get("OPENALEX_API_KEY") or "").strip(),
+        "arxiv_relation_no_arxiv_recheck_days": _parse_positive_int(
+            env.get("ARXIV_RELATION_NO_ARXIV_RECHECK_DAYS"),
+            default=ARXIV_RELATION_NO_ARXIV_RECHECK_DAYS,
+        ),
         "hf_exact_no_repo_recheck_days": _parse_positive_int(
             env.get("HF_EXACT_NO_REPO_RECHECK_DAYS"),
             default=HF_EXACT_NO_REPO_RECHECK_DAYS,
@@ -72,6 +82,7 @@ async def open_runtime_clients(
     github_min_interval: float | None = None,
 ):
     repo_cache = RepoCacheStore(REPO_CACHE_DB_PATH)
+    relation_resolution_cache = RelationResolutionCacheStore(REPO_CACHE_DB_PATH)
 
     try:
         async with session_factory(timeout=build_timeout()) as session:
@@ -94,10 +105,12 @@ async def open_runtime_clients(
             yield RuntimeClients(
                 session=session,
                 repo_cache=repo_cache,
+                relation_resolution_cache=relation_resolution_cache,
                 discovery_client=discovery_client,
                 github_client=github_client,
             )
     finally:
+        relation_resolution_cache.close()
         repo_cache.close()
 
 
