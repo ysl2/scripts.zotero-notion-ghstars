@@ -80,6 +80,14 @@ The mode should deduplicate after final normalization, not before:
 - rows resolved directly or indirectly to arXiv deduplicate by canonical arXiv URL
 - unresolved non-arXiv rows deduplicate by their retained final `Url`
 
+When multiple related works collapse to the same final identity, the winner must be selected by normalization strength, not by iteration order:
+
+1. direct arXiv normalization
+2. arXiv title-search mapping
+3. retained non-arXiv fallback row
+
+This precedence rule is especially important when a directly arXiv-backed work and a title-mapped work resolve to the same canonical arXiv URL. In that case, the directly normalized row must win.
+
 This avoids exporting duplicate rows when one related work is directly arXiv-backed and another equivalent OpenAlex record only resolves through title search.
 
 **CSV Semantics**
@@ -93,6 +101,7 @@ The CSV schema does not change:
 
 Field semantics:
 
+- directly normalized arXiv rows keep their directly resolved arXiv identity and title
 - mapped-to-arXiv rows use the matched arXiv title and canonical arXiv URL
 - unresolved non-arXiv rows use the original OpenAlex title and the fallback URL chosen by the priority rule above
 - `Github` and `Stars` remain blank when discovery cannot identify a repository
