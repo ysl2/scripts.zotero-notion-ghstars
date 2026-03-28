@@ -53,12 +53,12 @@ def test_dedup_breaks_same_strength_ties_by_normalized_then_original_title():
 
     rows = [
         NormalizedRelatedRow(
-            title="A  Study",
+            title="A-study",
             url="https://publisher.example/paper",
             strength=NormalizationStrength.RETAINED_NON_ARXIV,
         ),
         NormalizedRelatedRow(
-            title="A-study",
+            title="A  Study",
             url="https://publisher.example/paper",
             strength=NormalizationStrength.RETAINED_NON_ARXIV,
         ),
@@ -66,7 +66,13 @@ def test_dedup_breaks_same_strength_ties_by_normalized_then_original_title():
 
     winner = _dedupe_normalized_rows(rows)
 
-    assert winner[0].title == "A  Study"
+    assert winner == [
+        NormalizedRelatedRow(
+            title="A  Study",
+            url="https://publisher.example/paper",
+            strength=NormalizationStrength.RETAINED_NON_ARXIV,
+        )
+    ]
 
 
 @pytest.mark.anyio
