@@ -628,6 +628,55 @@ async def test_normalize_related_works_does_not_negative_cache_transient_hf_fail
 
 
 @pytest.mark.anyio
+async def test_normalize_related_works_does_not_negative_cache_unparseable_hf_payload():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1007/978-3-031-72933-1_9",
+                landing_page_url="https://publisher.example/fsgs",
+                openalex_url="https://openalex.org/WFSGS",
+            )
+
+    class FakeNoMatchArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("No title lookup should run after an unparseable HF payload")
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_search_html(self, title: str):
+            return '<div data-target="DailyPapers" data-props="{not-json"></div>', None
+
+    cache = FakeRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R1"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeNoMatchArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [
+        PaperSeed(
+            name="FSGS: Real-Time Few-Shot View Synthesis Using Gaussian Splatting",
+            url="https://doi.org/10.1007/978-3-031-72933-1_9",
+        )
+    ]
+    assert cache.record_calls == []
+
+
+@pytest.mark.anyio
 async def test_normalize_related_works_negative_caches_only_after_arxiv_and_hf_both_miss():
     from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
 
@@ -1038,6 +1087,130 @@ async def test_export_arxiv_relations_to_csv_exports_mixed_direct_mapped_and_ret
     assert result.citations.csv_path.name == "arxiv-2603.23502-citations-20260326113045.csv"
     assert any("Fetching OpenAlex referenced works" in message for message in statuses)
     assert any("Fetching OpenAlex citations" in message for message in statuses)
+
+
+@pytest.mark.anyio
+async def test_export_arxiv_relations_to_csv_uses_hf_fallback_for_unresolved_relations(
+    tmp_path: Path, monkeypatch
+):
+    from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+
+    events: list[tuple[str, str]] = []
+
+    class FakeArxivClient:
+        def __init__(self):
+            self.title_lookups: list[str] = []
+            self.api_title_searches: list[str] = []
+
+        async def get_title(self, arxiv_identifier: str):
+            self.title_lookups.append(arxiv_identifier)
+            title_mapping = {
+                "https://arxiv.org/abs/2603.23502": "Target Paper",
+                "2312.00451": "Mapped Reference",
+                "2312.00452": "Mapped Citation",
+            }
+            return title_mapping[arxiv_identifier], None
+
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation export should not use the legacy HTML title search path")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            self.api_title_searches.append(title)
+            return None, None, "No arXiv ID found from title search"
+
+    class FakeOpenAlexClient:
+        async def search_first_work(self, title: str):
+            assert title == "Target Paper"
+            return {"id": "https://openalex.org/W0"}
+
+        async def fetch_referenced_works(self, work: dict):
+            assert work == {"id": "https://openalex.org/W0"}
+            return [{"id": "R1"}]
+
+        async def fetch_citations(self, work: dict):
+            assert work == {"id": "https://openalex.org/W0"}
+            return [{"id": "C1"}]
+
+        def build_related_work_candidate(self, work: dict):
+            mapping = {
+                "R1": RelatedWorkCandidate(
+                    title="Reference Needs HF Mapping",
+                    direct_arxiv_url=None,
+                    doi_url="https://doi.org/10.1007/978-3-031-72933-1_9",
+                    landing_page_url="https://publisher.example/reference",
+                    openalex_url="https://openalex.org/WR1",
+                ),
+                "C1": RelatedWorkCandidate(
+                    title="Citation Needs HF Mapping",
+                    direct_arxiv_url=None,
+                    doi_url="https://doi.org/10.1007/978-3-031-72933-1_10",
+                    landing_page_url="https://publisher.example/citation",
+                    openalex_url="https://openalex.org/WC1",
+                ),
+            }
+            return mapping[work["id"]]
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_search_html(self, title: str):
+            events.append(("hf_search", title))
+            html_by_title = {
+                "Reference Needs HF Mapping": """
+                <div data-target="DailyPapers" data-props="{&quot;searchResults&quot;:[{&quot;paper&quot;:{&quot;id&quot;:&quot;2312.00451&quot;},&quot;title&quot;:&quot;Reference Needs HF Mapping&quot;}]}"></div>
+                """,
+                "Citation Needs HF Mapping": """
+                <div data-target="DailyPapers" data-props="{&quot;searchResults&quot;:[{&quot;paper&quot;:{&quot;id&quot;:&quot;2312.00452&quot;},&quot;title&quot;:&quot;Citation Needs HF Mapping&quot;}]}"></div>
+                """,
+            }
+            return html_by_title[title], None
+
+    arxiv_client = FakeArxivClient()
+    export_calls = []
+
+    async def fake_export(
+        seeds: list[PaperSeed],
+        csv_path: Path,
+        *,
+        discovery_client,
+        github_client,
+        status_callback=None,
+        progress_callback=None,
+    ):
+        export_calls.append({"seeds": seeds, "csv_path": csv_path})
+        return ConversionResult(csv_path=csv_path, resolved=len(seeds), skipped=[])
+
+    monkeypatch.setattr("src.arxiv_relations.pipeline.export_paper_seeds_to_csv", fake_export)
+
+    result = await export_arxiv_relations_to_csv(
+        "https://arxiv.org/abs/2603.23502",
+        arxiv_client=arxiv_client,
+        openalex_client=FakeOpenAlexClient(),
+        discovery_client=FakeDiscoveryClient(),
+        github_client=object(),
+        output_dir=tmp_path,
+    )
+
+    assert arxiv_client.api_title_searches == [
+        "Reference Needs HF Mapping",
+        "Citation Needs HF Mapping",
+    ]
+    assert arxiv_client.title_lookups == [
+        "https://arxiv.org/abs/2603.23502",
+        "2312.00451",
+        "2312.00452",
+    ]
+    assert events == [
+        ("hf_search", "Reference Needs HF Mapping"),
+        ("hf_search", "Citation Needs HF Mapping"),
+    ]
+
+    assert [call["seeds"] for call in export_calls] == [
+        [PaperSeed(name="Mapped Reference", url="https://arxiv.org/abs/2312.00451")],
+        [PaperSeed(name="Mapped Citation", url="https://arxiv.org/abs/2312.00452")],
+    ]
+    assert result.references.resolved == 1
+    assert result.citations.resolved == 1
 
 
 @pytest.mark.anyio
