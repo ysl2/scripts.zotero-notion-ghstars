@@ -24,6 +24,15 @@ ARXIV_SEARCH_LINK_PATTERN = re.compile(
     r'href="https://arxiv.org/abs/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?"',
     re.IGNORECASE,
 )
+ARXIV_ABS_CITATION_TITLE_PATTERN = re.compile(
+    r'<meta[^>]+name=["\']citation_title["\'][^>]+content=["\'](.*?)["\']',
+    re.IGNORECASE | re.S,
+)
+ARXIV_ABS_H1_TITLE_PATTERN = re.compile(
+    r'<h1[^>]*class=["\'][^"\']*\btitle\b[^"\']*["\'][^>]*>(.*?)</h1>',
+    re.IGNORECASE | re.S,
+)
+ARXIV_ABS_HEAD_TITLE_PATTERN = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.S)
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 NON_ALNUM_PATTERN = re.compile(r"[^0-9a-z]+")
 ARXIV_ID_ONLY_PATTERN = re.compile(
@@ -208,6 +217,33 @@ def _extract_title_from_feed(feed_xml: str, arxiv_id: str) -> str | None:
     return None
 
 
+def _extract_title_from_abs_html(html: str, arxiv_id: str) -> str | None:
+    if not html or not arxiv_id:
+        return None
+
+    meta_match = ARXIV_ABS_CITATION_TITLE_PATTERN.search(html)
+    if meta_match:
+        title = _strip_html_text(meta_match.group(1))
+        if title:
+            return title
+
+    h1_match = ARXIV_ABS_H1_TITLE_PATTERN.search(html)
+    if h1_match:
+        title = _strip_html_text(h1_match.group(1))
+        title = re.sub(r"^\s*Title:\s*", "", title, flags=re.IGNORECASE)
+        if title:
+            return title
+
+    head_title_match = ARXIV_ABS_HEAD_TITLE_PATTERN.search(html)
+    if head_title_match:
+        title = _strip_html_text(head_title_match.group(1))
+        title = re.sub(rf"^\s*\[{re.escape(arxiv_id)}\]\s*", "", title, flags=re.IGNORECASE)
+        if title:
+            return title
+
+    return None
+
+
 class ArxivClient:
     def __init__(self, session: aiohttp.ClientSession, max_concurrent: int = 5, min_interval: float = 0.2):
         self.session = session
@@ -272,12 +308,26 @@ class ArxivClient:
             retry_prefix="arXiv metadata query",
         )
         if error:
-            return None, error
+            feed_title = None
+        else:
+            feed_title = _extract_title_from_feed(feed_xml, arxiv_id)
+            if feed_title:
+                return feed_title, None
 
-        title = _extract_title_from_feed(feed_xml, arxiv_id)
-        if not title:
-            return None, "No title found on arXiv metadata feed"
-        return title, None
+        abs_html, abs_error = await self._request_text(
+            f"https://arxiv.org/abs/{arxiv_id}",
+            retry_prefix="arXiv abs page",
+        )
+        if not abs_error:
+            abs_title = _extract_title_from_abs_html(abs_html, arxiv_id)
+            if abs_title:
+                return abs_title, None
+
+        if error:
+            return None, error
+        if abs_error:
+            return None, abs_error
+        return None, "No title found on arXiv metadata feed or abs page"
 
     async def get_published_dates(self, arxiv_urls: list[str]) -> tuple[dict[str, str], dict[str, str]]:
         unique_urls = []

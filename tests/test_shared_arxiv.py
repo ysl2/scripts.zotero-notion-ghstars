@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from src.shared.arxiv import (
@@ -343,4 +345,59 @@ async def test_get_arxiv_title_accepts_single_paper_url_variants(url: str):
             "https://export.arxiv.org/api/query",
             {"id_list": "2501.12345"},
         )
+    ]
+
+
+@pytest.mark.anyio
+async def test_get_arxiv_title_falls_back_to_abs_page_when_metadata_feed_times_out():
+    class FakeResponse:
+        def __init__(self, status: int, text: str):
+            self.status = status
+            self._text = text
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def text(self):
+            return self._text
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+            self.metadata_attempts = 0
+
+        def get(self, url, params=None):
+            self.calls.append((url, params))
+            if url == "https://export.arxiv.org/api/query":
+                self.metadata_attempts += 1
+                raise asyncio.TimeoutError()
+
+            assert url == "https://arxiv.org/abs/2501.12345"
+            assert params is None
+            return FakeResponse(
+                200,
+                """
+                <html>
+                  <head>
+                    <meta name="citation_title" content="Fallback Title From abs page" />
+                  </head>
+                </html>
+                """,
+            )
+
+    session = FakeSession()
+    client = ArxivClient(session, max_concurrent=1, min_interval=0)
+
+    title, error = await client.get_title("https://arxiv.org/abs/2501.12345")
+
+    assert (title, error) == ("Fallback Title From abs page", None)
+    assert session.metadata_attempts == 3
+    assert session.calls == [
+        ("https://export.arxiv.org/api/query", {"id_list": "2501.12345"}),
+        ("https://export.arxiv.org/api/query", {"id_list": "2501.12345"}),
+        ("https://export.arxiv.org/api/query", {"id_list": "2501.12345"}),
+        ("https://arxiv.org/abs/2501.12345", None),
     ]
