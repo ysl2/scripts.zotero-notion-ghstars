@@ -106,6 +106,40 @@ def test_dedup_breaks_equal_normalized_titles_by_original_title():
     ]
 
 
+def test_dedup_breaks_same_strength_title_mapped_ties_by_original_openalex_title():
+    from src.arxiv_relations.pipeline import (
+        NormalizationStrength,
+        NormalizedRelatedRow,
+        _dedupe_normalized_rows,
+    )
+
+    rows = [
+        NormalizedRelatedRow(
+            title="Mapped Arxiv Title",
+            original_title="Zoo",
+            url="https://arxiv.org/abs/2501.12345",
+            strength=NormalizationStrength.TITLE_SEARCH,
+        ),
+        NormalizedRelatedRow(
+            title="Mapped Arxiv Title",
+            original_title="alpha",
+            url="https://arxiv.org/abs/2501.12345",
+            strength=NormalizationStrength.TITLE_SEARCH,
+        ),
+    ]
+
+    winner = _dedupe_normalized_rows(rows)
+
+    assert winner == [
+        NormalizedRelatedRow(
+            title="Mapped Arxiv Title",
+            original_title="alpha",
+            url="https://arxiv.org/abs/2501.12345",
+            strength=NormalizationStrength.TITLE_SEARCH,
+        )
+    ]
+
+
 @pytest.mark.anyio
 async def test_normalize_related_works_maps_non_arxiv_title_hits_to_canonical_arxiv():
     from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
@@ -267,7 +301,7 @@ async def test_normalize_related_works_resolves_non_direct_rows_concurrently():
 
 
 @pytest.mark.anyio
-async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_both_sets(
+async def test_export_arxiv_relations_to_csv_exports_mixed_direct_mapped_and_retained_rows(
     tmp_path: Path, monkeypatch
 ):
     from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
@@ -281,14 +315,17 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
             self.calls.append(arxiv_identifier)
             title_mapping = {
                 "https://arxiv.org/abs/2603.23502": "Target Paper",
-                "2501.00001": "Reference A",
-                "2502.00002": "Citation A",
+                "2501.00002": "Mapped Reference",
             }
             return title_mapping[arxiv_identifier], None
 
         async def get_arxiv_id_by_title(self, title: str):
             self.title_searches.append(title)
-            return None, None, "No arXiv ID found from title search"
+            if title == "Reference Needs Mapping":
+                return "2501.00002", "title_search_exact", None
+            if title == "Publisher Reference":
+                return None, None, "No arXiv ID found from title search"
+            raise AssertionError(f"Unexpected title search: {title}")
 
     class FakeOpenAlexClient:
         def __init__(self):
@@ -318,24 +355,24 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
         def build_related_work_candidate(self, work: dict):
             mapping = {
                 "R1": RelatedWorkCandidate(
-                    title="Reference A",
+                    title="Direct Reference",
                     direct_arxiv_url="https://arxiv.org/abs/2501.00001",
                     doi_url=None,
                     landing_page_url=None,
                     openalex_url="https://openalex.org/WR1",
                 ),
                 "R2": RelatedWorkCandidate(
-                    title="Reference Missing",
+                    title="Reference Needs Mapping",
                     direct_arxiv_url=None,
                     doi_url=None,
-                    landing_page_url=None,
+                    landing_page_url="https://publisher.example/mapped",
                     openalex_url="https://openalex.org/WR2",
                 ),
                 "R3": RelatedWorkCandidate(
-                    title="Reference A Duplicate",
-                    direct_arxiv_url="https://arxiv.org/abs/2501.00001",
-                    doi_url=None,
-                    landing_page_url=None,
+                    title="Publisher Reference",
+                    direct_arxiv_url=None,
+                    doi_url="https://doi.org/10.1145/example",
+                    landing_page_url="https://publisher.example/doi",
                     openalex_url="https://openalex.org/WR3",
                 ),
                 "C1": RelatedWorkCandidate(
@@ -393,8 +430,8 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
         status_callback=statuses.append,
     )
 
-    assert arxiv_client.calls == ["https://arxiv.org/abs/2603.23502"]
-    assert arxiv_client.title_searches == ["Reference Missing"]
+    assert arxiv_client.calls == ["https://arxiv.org/abs/2603.23502", "2501.00002"]
+    assert arxiv_client.title_searches == ["Reference Needs Mapping", "Publisher Reference"]
     assert openalex_client.title_queries == ["Target Paper"]
     assert openalex_client.reference_work_queries == [{"id": "https://openalex.org/W0"}]
     assert openalex_client.citation_work_queries == [{"id": "https://openalex.org/W0"}]
@@ -408,8 +445,9 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
     reference_seeds = export_calls[0]["seeds"]
     citation_seeds = export_calls[1]["seeds"]
     assert reference_seeds == [
-        PaperSeed(name="Reference A", url="https://arxiv.org/abs/2501.00001"),
-        PaperSeed(name="Reference Missing", url="https://openalex.org/WR2"),
+        PaperSeed(name="Direct Reference", url="https://arxiv.org/abs/2501.00001"),
+        PaperSeed(name="Mapped Reference", url="https://arxiv.org/abs/2501.00002"),
+        PaperSeed(name="Publisher Reference", url="https://doi.org/10.1145/example"),
     ]
     assert citation_seeds == [PaperSeed(name="Citation A", url="https://arxiv.org/abs/2502.00002")]
     assert all(isinstance(seed, PaperSeed) for seed in reference_seeds + citation_seeds)

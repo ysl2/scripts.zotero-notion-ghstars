@@ -241,7 +241,7 @@ URL mode behavior:
 
 ### Single-paper arXiv relation export mode
 
-Reads one arXiv paper URL, resolves related works through OpenAlex, filters to arXiv-backed items only in this first version, and writes two CSV files under `./output` in the current working directory by default.
+Reads one arXiv paper URL, resolves related works through OpenAlex, normalizes them to canonical arXiv rows when possible, retains unresolved non-arXiv rows otherwise, and writes two CSV files under `./output` in the current working directory by default.
 
 Command shape:
 
@@ -281,10 +281,13 @@ Single-paper mode behavior:
 
 - resolves the input paper title from arXiv metadata first, then searches OpenAlex by title
 - accepts the first OpenAlex work returned by relevance order
-- keeps only related works that normalize to canonical, versionless arXiv `abs` URLs
-- referenced and citing works are deduplicated by canonical arXiv URL before export
+- keeps direct arXiv-backed related works as canonical, versionless arXiv `abs` rows
+- otherwise tries arXiv title search and takes the first most relevant hit
+- mapped rows use the matched arXiv title and canonical arXiv `abs` URL
+- if still unresolved, keeps the non-arXiv row with `Url` priority `DOI > landing page > OpenAlex URL`
+- referenced and citing works are deduplicated by final normalized URL before export
 - both CSVs use the standard columns: `Name`, `Url`, `Github`, `Stars`
-- shared GitHub discovery and star enrichment are reused, so rows remain in the CSV even when no repo is found; in that case `Github` and `Stars` are left blank
+- shared GitHub discovery and star enrichment are reused, so resolved and unresolved rows remain in the CSV even when no repo is found; in that case `Github` and `Stars` are left blank
 - a missing OpenAlex detail record for one referenced work currently causes that one related work to be skipped while the rest of the export continues
 - the CLI reports success only after both CSV files are written; other arXiv or OpenAlex hard failures still return a nonzero exit code
 

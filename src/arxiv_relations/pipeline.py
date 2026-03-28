@@ -29,6 +29,7 @@ class NormalizedRelatedRow:
     title: str
     url: str
     strength: NormalizationStrength
+    original_title: str = ""
 
 
 def normalize_single_arxiv_input(arxiv_input: str) -> str:
@@ -67,27 +68,33 @@ def _fallback_related_work_url(candidate) -> str:
 
 async def _resolve_related_work_row(candidate, *, arxiv_client) -> NormalizedRelatedRow:
     if candidate.direct_arxiv_url:
+        resolved_title = candidate.title or candidate.direct_arxiv_url
         return NormalizedRelatedRow(
-            title=candidate.title or candidate.direct_arxiv_url,
+            title=resolved_title,
             url=candidate.direct_arxiv_url,
             strength=NormalizationStrength.DIRECT_ARXIV,
+            original_title=resolved_title,
         )
 
     matched_arxiv_id, _, _ = await arxiv_client.get_arxiv_id_by_title(candidate.title)
     if matched_arxiv_id:
         matched_title, _ = await arxiv_client.get_title(matched_arxiv_id)
         matched_url = build_arxiv_abs_url(matched_arxiv_id)
+        original_title = candidate.title or matched_title or matched_url
         return NormalizedRelatedRow(
             title=matched_title or candidate.title or matched_url,
             url=matched_url,
             strength=NormalizationStrength.TITLE_SEARCH,
+            original_title=original_title,
         )
 
     fallback_url = _fallback_related_work_url(candidate)
+    original_title = candidate.title or fallback_url
     return NormalizedRelatedRow(
-        title=candidate.title or fallback_url,
+        title=original_title,
         url=fallback_url,
         strength=NormalizationStrength.RETAINED_NON_ARXIV,
+        original_title=original_title,
     )
 
 
@@ -101,7 +108,8 @@ async def _resolve_related_work_rows(candidates: list, *, arxiv_client) -> list[
 
 
 def _normalized_row_ordering(row: NormalizedRelatedRow) -> tuple[int, str, str]:
-    return (int(row.strength), normalize_title_for_matching(row.title), row.title)
+    comparison_title = row.original_title or row.title
+    return (int(row.strength), normalize_title_for_matching(comparison_title), comparison_title)
 
 
 def _dedupe_normalized_rows(rows: list[NormalizedRelatedRow]) -> list[NormalizedRelatedRow]:
