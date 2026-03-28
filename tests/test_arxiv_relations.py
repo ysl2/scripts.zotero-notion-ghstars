@@ -75,6 +75,37 @@ def test_dedup_breaks_same_strength_ties_by_normalized_then_original_title():
     ]
 
 
+def test_dedup_breaks_equal_normalized_titles_by_original_title():
+    from src.arxiv_relations.pipeline import (
+        NormalizationStrength,
+        NormalizedRelatedRow,
+        _dedupe_normalized_rows,
+    )
+
+    rows = [
+        NormalizedRelatedRow(
+            title="A-study",
+            url="https://publisher.example/paper",
+            strength=NormalizationStrength.RETAINED_NON_ARXIV,
+        ),
+        NormalizedRelatedRow(
+            title="A  Study",
+            url="https://publisher.example/paper",
+            strength=NormalizationStrength.RETAINED_NON_ARXIV,
+        ),
+    ]
+
+    winner = _dedupe_normalized_rows(rows)
+
+    assert winner == [
+        NormalizedRelatedRow(
+            title="A  Study",
+            url="https://publisher.example/paper",
+            strength=NormalizationStrength.RETAINED_NON_ARXIV,
+        )
+    ]
+
+
 @pytest.mark.anyio
 async def test_normalize_related_works_maps_non_arxiv_title_hits_to_canonical_arxiv():
     from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
