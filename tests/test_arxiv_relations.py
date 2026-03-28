@@ -198,16 +198,6 @@ async def test_export_arxiv_relations_to_csv_resolves_title_filters_and_exports_
             }
             return mapping[work["id"]]
 
-        def normalize_related_work(self, work: dict):
-            mapping = {
-                "R1": PaperSeed(name="Reference A", url="https://arxiv.org/abs/2501.00001"),
-                "R2": None,
-                "R3": PaperSeed(name="Reference A Duplicate", url="https://arxiv.org/abs/2501.00001"),
-                "C1": PaperSeed(name="Citation A", url="https://arxiv.org/abs/2502.00002"),
-                "C2": PaperSeed(name="Citation A Duplicate", url="https://arxiv.org/abs/2502.00002"),
-            }
-            return mapping[work["id"]]
-
     arxiv_client = FakeArxivClient()
     openalex_client = FakeOpenAlexClient()
     discovery_client = object()
