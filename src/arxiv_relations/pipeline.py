@@ -107,9 +107,15 @@ async def _resolve_related_work_rows(candidates: list, *, arxiv_client) -> list[
     )
 
 
-def _normalized_row_ordering(row: NormalizedRelatedRow) -> tuple[int, str, str]:
-    comparison_title = row.original_title or row.title
-    return (int(row.strength), normalize_title_for_matching(comparison_title), comparison_title)
+def _normalized_row_ordering(row: NormalizedRelatedRow) -> tuple[int, str, str, str, str]:
+    original_title = row.original_title or row.title
+    return (
+        int(row.strength),
+        normalize_title_for_matching(row.title),
+        row.title,
+        normalize_title_for_matching(original_title),
+        original_title,
+    )
 
 
 def _dedupe_normalized_rows(rows: list[NormalizedRelatedRow]) -> list[NormalizedRelatedRow]:

@@ -140,6 +140,40 @@ def test_dedup_breaks_same_strength_title_mapped_ties_by_original_openalex_title
     ]
 
 
+def test_dedup_breaks_title_mapped_ties_by_final_title_before_original_title():
+    from src.arxiv_relations.pipeline import (
+        NormalizationStrength,
+        NormalizedRelatedRow,
+        _dedupe_normalized_rows,
+    )
+
+    rows = [
+        NormalizedRelatedRow(
+            title="Z Matched",
+            original_title="alpha",
+            url="https://arxiv.org/abs/2501.12345",
+            strength=NormalizationStrength.TITLE_SEARCH,
+        ),
+        NormalizedRelatedRow(
+            title="A Matched",
+            original_title="zulu",
+            url="https://arxiv.org/abs/2501.12345",
+            strength=NormalizationStrength.TITLE_SEARCH,
+        ),
+    ]
+
+    winner = _dedupe_normalized_rows(rows)
+
+    assert winner == [
+        NormalizedRelatedRow(
+            title="A Matched",
+            original_title="zulu",
+            url="https://arxiv.org/abs/2501.12345",
+            strength=NormalizationStrength.TITLE_SEARCH,
+        )
+    ]
+
+
 @pytest.mark.anyio
 async def test_normalize_related_works_maps_non_arxiv_title_hits_to_canonical_arxiv():
     from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
