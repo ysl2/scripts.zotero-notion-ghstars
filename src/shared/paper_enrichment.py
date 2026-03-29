@@ -7,16 +7,6 @@ from src.shared.paper_identity import build_arxiv_abs_url, normalize_arxiv_url, 
 
 
 @dataclass(frozen=True)
-class EnrichedPaper:
-    name: str
-    url: str
-    github_url: str
-    stars: int | None
-    source: str | None
-    reason: str | None
-
-
-@dataclass(frozen=True)
 class PaperEnrichmentRequest:
     title: str
     raw_url: str
@@ -151,35 +141,6 @@ async def process_single_paper(
         github_source=github_source,
         stars=stars,
         reason=None,
-    )
-
-
-async def enrich_paper(
-    *,
-    name: str,
-    url: str,
-    discovery_client,
-    github_client,
-    existing_github: str | None = None,
-) -> EnrichedPaper:
-    result = await process_single_paper(
-        PaperEnrichmentRequest(
-            title=name,
-            raw_url=url,
-            existing_github_url=existing_github,
-            allow_title_search=False,
-            allow_github_discovery=True,
-        ),
-        discovery_client=discovery_client,
-        github_client=github_client,
-    )
-    return EnrichedPaper(
-        name=result.title,
-        url=result.normalized_url or result.raw_url or "",
-        github_url=result.github_url or "",
-        stars=result.stars,
-        source=result.github_source,
-        reason=result.reason,
     )
 
 

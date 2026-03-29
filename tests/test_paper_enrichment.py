@@ -6,6 +6,13 @@ import pytest
 from src.shared.paper_enrichment import PaperEnrichmentRequest, process_single_paper
 
 
+def test_paper_enrichment_module_no_longer_exposes_compatibility_shim():
+    import src.shared.paper_enrichment as paper_enrichment
+
+    assert "EnrichedPaper" not in vars(paper_enrichment)
+    assert "enrich_paper" not in vars(paper_enrichment)
+
+
 class RecordingContentCache:
     def __init__(self):
         self.calls: list[str] = []
