@@ -248,6 +248,7 @@ async def export_arxiv_relations_to_csv(
     openalex_client,
     discovery_client,
     github_client,
+    content_cache=None,
     relation_resolution_cache=None,
     arxiv_relation_no_arxiv_recheck_days: int = 30,
     output_dir: Path | None = None,
@@ -301,6 +302,7 @@ async def export_arxiv_relations_to_csv(
         references_csv_path,
         discovery_client=discovery_client,
         github_client=github_client,
+        content_cache=content_cache,
         status_callback=status_callback,
         progress_callback=progress_callback,
     )
@@ -309,6 +311,7 @@ async def export_arxiv_relations_to_csv(
         citations_csv_path,
         discovery_client=discovery_client,
         github_client=github_client,
+        content_cache=content_cache,
         status_callback=status_callback,
         progress_callback=progress_callback,
     )

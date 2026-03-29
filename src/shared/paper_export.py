@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 
 from src.shared.csv_io import write_records_to_csv_path
-from src.shared.paper_enrichment import enrich_paper
+from src.shared.paper_enrichment import PaperEnrichmentRequest, process_single_paper
 from src.shared.papers import ConversionResult, PaperOutcome, PaperRecord, PaperSeed
 from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
 
@@ -13,19 +13,26 @@ async def build_paper_outcome(
     *,
     discovery_client,
     github_client,
+    content_cache=None,
 ) -> PaperOutcome:
-    enrichment = await enrich_paper(
-        name=seed.name,
-        url=seed.url,
+    enrichment = await process_single_paper(
+        PaperEnrichmentRequest(
+            title=seed.name,
+            raw_url=seed.url,
+            existing_github_url=None,
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
         discovery_client=discovery_client,
         github_client=github_client,
+        content_cache=content_cache,
     )
 
     return PaperOutcome(
         index=index,
         record=PaperRecord(
-            name=enrichment.name,
-            url=enrichment.url,
+            name=enrichment.title,
+            url=enrichment.normalized_url or enrichment.raw_url or "",
             github=enrichment.github_url or "",
             stars=enrichment.stars if enrichment.reason is None else "",
             sort_index=index,
@@ -40,6 +47,7 @@ async def export_paper_seeds_to_csv(
     *,
     discovery_client,
     github_client,
+    content_cache=None,
     status_callback=None,
     progress_callback=None,
 ) -> ConversionResult:
@@ -57,6 +65,7 @@ async def export_paper_seeds_to_csv(
                 seed,
                 discovery_client=discovery_client,
                 github_client=github_client,
+                content_cache=content_cache,
             )
         )
         for index, seed in enumerate(seeds, 1)

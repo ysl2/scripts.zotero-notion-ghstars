@@ -2,9 +2,12 @@ import csv
 import html
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from src.shared.paper_content import PaperContentCache
+from src.shared.settings import ABS_CACHE_SUBDIR, OVERVIEW_CACHE_SUBDIR
 from src.url_to_csv.arxivxplorer import TooManyPagesError, output_csv_path_for_arxivxplorer_url, parse_arxivxplorer_url
 from src.url_to_csv.pipeline import fetch_paper_seeds_from_url, export_url_to_csv
 from src.url_to_csv.runner import run_url_mode
@@ -548,6 +551,179 @@ async def test_export_url_to_csv_writes_semanticscholar_results_in_output_dir(tm
             "Stars": "10",
         },
     ]
+
+
+@pytest.mark.anyio
+async def test_export_url_to_csv_warms_content_and_reuses_cached_files(tmp_path: Path):
+    class FakeSearchClient:
+        async def search(self, query, page: int):
+            data = {
+                1: [
+                    {"id": "2501.00001", "journal": "arxiv", "title": "Paper A"},
+                ],
+                2: [],
+            }
+            return data[page]
+
+    class FakeDiscoveryClient:
+        async def resolve_github_url(self, seed):
+            assert seed.url == "https://arxiv.org/abs/2501.00001"
+            return "https://github.com/foo/bar"
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            assert (owner, repo) == ("foo", "bar")
+            return 11, None
+
+    class FakeAlphaXivContentClient:
+        def __init__(self):
+            self.paper_calls: list[str] = []
+            self.overview_calls: list[tuple[str, str]] = []
+
+        async def get_paper_payload_by_arxiv_id(self, arxiv_id: str):
+            self.paper_calls.append(arxiv_id)
+            return (
+                {
+                    "title": "Paper A",
+                    "abstract": "Paper A abstract",
+                    "sourceUrl": "https://arxiv.org/abs/2501.00001",
+                    "versionId": "v2501.00001",
+                },
+                None,
+            )
+
+        async def get_overview_payload_by_version_id(self, version_id: str, *, language: str = "en"):
+            self.overview_calls.append((version_id, language))
+            return ({"overview": "Paper A overview"}, None)
+
+    content_client = FakeAlphaXivContentClient()
+    content_cache = PaperContentCache(cache_root=tmp_path / "cache", content_client=content_client)
+
+    first_result = await export_url_to_csv(
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026",
+        output_dir=tmp_path,
+        search_client=FakeSearchClient(),
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+        content_cache=content_cache,
+    )
+    second_result = await export_url_to_csv(
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026",
+        output_dir=tmp_path,
+        search_client=FakeSearchClient(),
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+        content_cache=content_cache,
+    )
+
+    with second_result.csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    assert first_result.csv_path == tmp_path / "arxivxplorer-streaming-semantic-3d-reconstruction-cs.CV-2026-20260326113045.csv"
+    assert second_result.csv_path == first_result.csv_path
+    assert rows == [
+        {
+            "Name": "Paper A",
+            "Url": "https://arxiv.org/abs/2501.00001",
+            "Github": "https://github.com/foo/bar",
+            "Stars": "11",
+        }
+    ]
+    assert (tmp_path / "cache" / OVERVIEW_CACHE_SUBDIR / "2501.00001.md").exists()
+    assert (tmp_path / "cache" / ABS_CACHE_SUBDIR / "2501.00001.md").exists()
+    assert content_client.paper_calls == ["2501.00001"]
+    assert content_client.overview_calls == [("v2501.00001", "en")]
+
+
+@pytest.mark.anyio
+async def test_run_url_mode_builds_and_passes_content_cache(tmp_path: Path, monkeypatch):
+    received = {}
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSearchClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeArxivOrgClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeHuggingFacePapersClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeSemanticScholarClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeArxivClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeDiscoveryClient:
+        def __init__(self, session, *, huggingface_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeGitHubClient:
+        def __init__(self, session, github_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeContentClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+            received["content_client"] = self
+
+    async def fake_export(
+        input_url: str,
+        *,
+        search_client=None,
+        arxiv_org_client=None,
+        huggingface_papers_client=None,
+        semanticscholar_client=None,
+        arxiv_client=None,
+        discovery_client,
+        github_client,
+        content_cache=None,
+        output_dir=None,
+        status_callback=None,
+        progress_callback=None,
+    ):
+        received["input_url"] = input_url
+        received["content_cache"] = content_cache
+        received["output_dir"] = output_dir
+        return SimpleNamespace(csv_path=tmp_path / "papers.csv", resolved=1, skipped=[])
+
+    monkeypatch.setattr("src.url_to_csv.runner.export_url_to_csv", fake_export)
+
+    exit_code = await run_url_mode(
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026",
+        output_dir=tmp_path,
+        session_factory=lambda **kwargs: FakeSession(),
+        arxiv_client_cls=FakeArxivClient,
+        search_client_cls=FakeSearchClient,
+        arxiv_org_client_cls=FakeArxivOrgClient,
+        huggingface_papers_client_cls=FakeHuggingFacePapersClient,
+        semanticscholar_client_cls=FakeSemanticScholarClient,
+        discovery_client_cls=FakeDiscoveryClient,
+        github_client_cls=FakeGitHubClient,
+        content_client_cls=FakeContentClient,
+        content_cache_root=tmp_path / "cache",
+    )
+
+    assert exit_code == 0
+    assert received["input_url"] == (
+        "https://arxivxplorer.com/?q=streaming+semantic+3d+reconstruction&cats=cs.CV&year=2026"
+    )
+    assert received["output_dir"] == tmp_path
+    assert received["content_cache"] is not None
+    assert received["content_cache"].cache_root == tmp_path / "cache"
+    assert received["content_cache"].content_client is received["content_client"]
 
 
 @pytest.mark.anyio

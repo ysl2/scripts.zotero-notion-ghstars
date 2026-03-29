@@ -4,12 +4,14 @@ from pathlib import Path
 
 import aiohttp
 
+from src.shared.alphaxiv_content import AlphaXivContentClient
 from src.shared.arxiv import ArxivClient
 from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient
+from src.shared.paper_content import PaperContentCache
 from src.shared.progress import print_paper_progress, print_summary
 from src.shared.runtime import build_client, load_runtime_config, open_runtime_clients
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.settings import CONTENT_CACHE_DIR, DEFAULT_CONCURRENT_LIMIT
 from src.shared.skip_reasons import is_minor_skip_reason
 from src.url_to_csv.arxivxplorer import ArxivXplorerSearchClient
 from src.url_to_csv.arxiv_org import ArxivOrgClient
@@ -35,6 +37,8 @@ async def run_url_mode(
     semanticscholar_client_cls=SemanticScholarSearchClient,
     discovery_client_cls=DiscoveryClient,
     github_client_cls=GitHubClient,
+    content_client_cls=AlphaXivContentClient,
+    content_cache_root: Path | str | None = None,
 ) -> int:
     if not is_supported_url_source(input_url):
         print(f"Unsupported URL: {input_url}", file=sys.stderr)
@@ -79,6 +83,16 @@ async def run_url_mode(
             max_concurrent=CONCURRENT_LIMIT,
             min_interval=REQUEST_DELAY,
         )
+        content_client = build_client(
+            content_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        content_cache = PaperContentCache(
+            cache_root=Path(content_cache_root) if content_cache_root is not None else Path(CONTENT_CACHE_DIR),
+            content_client=content_client,
+        )
 
         result = await export_url_to_csv(
             input_url,
@@ -90,6 +104,7 @@ async def run_url_mode(
             arxiv_client=arxiv_client,
             discovery_client=runtime.discovery_client,
             github_client=runtime.github_client,
+            content_cache=content_cache,
             status_callback=lambda message: print(message, flush=True),
             progress_callback=lambda outcome, total: print_paper_progress(
                 outcome,

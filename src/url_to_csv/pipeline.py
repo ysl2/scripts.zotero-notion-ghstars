@@ -93,6 +93,7 @@ async def export_url_to_csv(
     arxiv_client=None,
     discovery_client,
     github_client,
+    content_cache=None,
     output_dir: Path | None = None,
     status_callback=None,
     progress_callback=None,
@@ -113,6 +114,7 @@ async def export_url_to_csv(
         fetched.csv_path,
         discovery_client=discovery_client,
         github_client=github_client,
+        content_cache=content_cache,
         status_callback=status_callback,
         progress_callback=progress_callback,
     )

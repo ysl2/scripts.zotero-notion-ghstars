@@ -1,3 +1,4 @@
+import csv
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -1459,6 +1460,7 @@ async def test_export_arxiv_relations_to_csv_exports_mixed_direct_mapped_and_ret
         *,
         discovery_client,
         github_client,
+        content_cache=None,
         status_callback=None,
         progress_callback=None,
     ):
@@ -1468,6 +1470,7 @@ async def test_export_arxiv_relations_to_csv_exports_mixed_direct_mapped_and_ret
                 "csv_path": csv_path,
                 "discovery_client": discovery_client,
                 "github_client": github_client,
+                "content_cache": content_cache,
             }
         )
         return ConversionResult(csv_path=csv_path, resolved=len(seeds), skipped=[])
@@ -1614,10 +1617,11 @@ async def test_export_arxiv_relations_to_csv_uses_hf_fallback_for_unresolved_rel
         *,
         discovery_client,
         github_client,
+        content_cache=None,
         status_callback=None,
         progress_callback=None,
     ):
-        export_calls.append({"seeds": seeds, "csv_path": csv_path})
+        export_calls.append({"seeds": seeds, "csv_path": csv_path, "content_cache": content_cache})
         return ConversionResult(csv_path=csv_path, resolved=len(seeds), skipped=[])
 
     monkeypatch.setattr("src.arxiv_relations.pipeline.export_paper_seeds_to_csv", fake_export)
@@ -1673,6 +1677,154 @@ async def test_export_arxiv_relations_to_csv_rejects_invalid_single_paper_input(
             discovery_client=object(),
             github_client=object(),
         )
+
+
+@pytest.mark.anyio
+async def test_export_arxiv_relations_to_csv_warms_content_for_arxiv_rows_and_preserves_retained_non_arxiv_rows(
+    tmp_path: Path,
+):
+    from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+
+    class RecordingContentCache:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def ensure_local_content_cache(self, canonical_arxiv_url: str) -> None:
+            self.calls.append(canonical_arxiv_url)
+
+    class FakeArxivClient:
+        def __init__(self):
+            self.api_title_searches: list[str] = []
+
+        async def get_title(self, arxiv_identifier: str):
+            if arxiv_identifier == "https://arxiv.org/abs/2603.23502":
+                return "Target Paper", None
+            raise AssertionError(f"Unexpected arXiv title lookup: {arxiv_identifier}")
+
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation export should use the arXiv API title search path")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            self.api_title_searches.append(title)
+            return None, None, "No arXiv ID found from title search"
+
+    class FakeOpenAlexClient:
+        async def search_first_work(self, title: str):
+            assert title == "Target Paper"
+            return {"id": "https://openalex.org/W0"}
+
+        async def fetch_referenced_works(self, work: dict):
+            assert work == {"id": "https://openalex.org/W0"}
+            return [{"id": "R1"}, {"id": "R2"}]
+
+        async def fetch_citations(self, work: dict):
+            assert work == {"id": "https://openalex.org/W0"}
+            return [{"id": "C1"}]
+
+        def build_related_work_candidate(self, work: dict):
+            mapping = {
+                "R1": RelatedWorkCandidate(
+                    title="Direct Reference",
+                    direct_arxiv_url="https://arxiv.org/abs/2501.00001",
+                    doi_url=None,
+                    landing_page_url=None,
+                    openalex_url="https://openalex.org/WR1",
+                ),
+                "R2": RelatedWorkCandidate(
+                    title="Retained DOI Reference",
+                    direct_arxiv_url=None,
+                    doi_url="https://doi.org/10.1145/example",
+                    landing_page_url="https://publisher.example/reference",
+                    openalex_url="https://openalex.org/WR2",
+                ),
+                "C1": RelatedWorkCandidate(
+                    title="Citation With Missing Stars",
+                    direct_arxiv_url="https://arxiv.org/abs/2502.00002",
+                    doi_url=None,
+                    landing_page_url=None,
+                    openalex_url="https://openalex.org/WC1",
+                ),
+            }
+            return mapping[work["id"]]
+
+    class FakeDiscoveryClient:
+        huggingface_token = ""
+
+        async def resolve_github_url(self, seed):
+            mapping = {
+                "https://arxiv.org/abs/2501.00001": "https://github.com/foo/reference",
+                "https://arxiv.org/abs/2502.00002": "https://github.com/foo/citation",
+            }
+            return mapping.get(seed.url)
+
+    class FakeGitHubClient:
+        async def get_star_count(self, owner, repo):
+            mapping = {
+                ("foo", "reference"): (12, None),
+                ("foo", "citation"): (None, "GitHub API error (503)"),
+            }
+            return mapping[(owner, repo)]
+
+    content_cache = RecordingContentCache()
+    result = await export_arxiv_relations_to_csv(
+        "https://arxiv.org/abs/2603.23502",
+        arxiv_client=FakeArxivClient(),
+        openalex_client=FakeOpenAlexClient(),
+        discovery_client=FakeDiscoveryClient(),
+        github_client=FakeGitHubClient(),
+        content_cache=content_cache,
+        output_dir=tmp_path,
+    )
+
+    with result.references.csv_path.open(newline="", encoding="utf-8") as handle:
+        reference_rows = list(csv.DictReader(handle))
+    with result.citations.csv_path.open(newline="", encoding="utf-8") as handle:
+        citation_rows = list(csv.DictReader(handle))
+
+    assert reference_rows == [
+        {
+            "Name": "Direct Reference",
+            "Url": "https://arxiv.org/abs/2501.00001",
+            "Github": "https://github.com/foo/reference",
+            "Stars": "12",
+        },
+        {
+            "Name": "Retained DOI Reference",
+            "Url": "https://doi.org/10.1145/example",
+            "Github": "",
+            "Stars": "",
+        },
+    ]
+    assert citation_rows == [
+        {
+            "Name": "Citation With Missing Stars",
+            "Url": "https://arxiv.org/abs/2502.00002",
+            "Github": "https://github.com/foo/citation",
+            "Stars": "",
+        }
+    ]
+    assert sorted(content_cache.calls) == [
+        "https://arxiv.org/abs/2501.00001",
+        "https://arxiv.org/abs/2502.00002",
+    ]
+    assert result.references.resolved == 1
+    assert result.references.skipped == [
+        {
+            "title": "Retained DOI Reference",
+            "github_url": None,
+            "detail_url": "https://doi.org/10.1145/example",
+            "reason": "No valid arXiv URL found",
+        }
+    ]
+    assert result.citations.resolved == 0
+    assert result.citations.skipped == [
+        {
+            "title": "Citation With Missing Stars",
+            "github_url": "https://github.com/foo/citation",
+            "detail_url": "https://arxiv.org/abs/2502.00002",
+            "reason": "GitHub API error (503)",
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -1966,6 +2118,11 @@ async def test_run_arxiv_relations_mode_successfully_wires_clients_callbacks_and
             self.session = session
             constructed["github_client"] = self
 
+    class FakeContentClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+            constructed["content_client"] = self
+
     async def fake_export(
         arxiv_input: str,
         *,
@@ -1974,6 +2131,7 @@ async def test_run_arxiv_relations_mode_successfully_wires_clients_callbacks_and
         openalex_client,
         discovery_client,
         github_client,
+        content_cache,
         relation_resolution_cache,
         arxiv_relation_no_arxiv_recheck_days,
         status_callback=None,
@@ -1987,6 +2145,7 @@ async def test_run_arxiv_relations_mode_successfully_wires_clients_callbacks_and
                 "openalex_client": openalex_client,
                 "discovery_client": discovery_client,
                 "github_client": github_client,
+                "content_cache": content_cache,
                 "relation_resolution_cache": relation_resolution_cache,
                 "arxiv_relation_no_arxiv_recheck_days": arxiv_relation_no_arxiv_recheck_days,
                 "status_callback": status_callback,
@@ -2029,6 +2188,7 @@ async def test_run_arxiv_relations_mode_successfully_wires_clients_callbacks_and
         openalex_client_cls=FakeOpenAlexClient,
         discovery_client_cls=FakeDiscoveryClient,
         github_client_cls=FakeGitHubClient,
+        content_client_cls=FakeContentClient,
     )
 
     captured = capsys.readouterr()
@@ -2042,6 +2202,8 @@ async def test_run_arxiv_relations_mode_successfully_wires_clients_callbacks_and
     assert export_calls[0]["openalex_client"] is constructed["openalex_client"]
     assert export_calls[0]["discovery_client"] is constructed["discovery_client"]
     assert export_calls[0]["github_client"] is constructed["github_client"]
+    assert export_calls[0]["content_cache"] is not None
+    assert export_calls[0]["content_cache"].content_client is constructed["content_client"]
     assert export_calls[0]["relation_resolution_cache"] is not None
     assert export_calls[0]["arxiv_relation_no_arxiv_recheck_days"] == 30
     assert "Starting relation export" in captured.out

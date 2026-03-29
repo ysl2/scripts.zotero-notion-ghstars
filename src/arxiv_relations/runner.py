@@ -6,13 +6,15 @@ from pathlib import Path
 import aiohttp
 
 from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+from src.shared.alphaxiv_content import AlphaXivContentClient
 from src.shared.arxiv import ArxivClient
 from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient
 from src.shared.openalex import OpenAlexClient
+from src.shared.paper_content import PaperContentCache
 from src.shared.progress import print_paper_progress, print_summary
 from src.shared.runtime import build_client, load_runtime_config, open_runtime_clients
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.settings import CONTENT_CACHE_DIR, DEFAULT_CONCURRENT_LIMIT
 from src.shared.skip_reasons import is_minor_skip_reason
 
 
@@ -29,6 +31,7 @@ async def run_arxiv_relations_mode(
     openalex_client_cls=OpenAlexClient,
     discovery_client_cls=DiscoveryClient,
     github_client_cls=GitHubClient,
+    content_client_cls=AlphaXivContentClient,
 ) -> int:
     try:
         config = load_runtime_config(dict(os.environ))
@@ -54,6 +57,16 @@ async def run_arxiv_relations_mode(
                 max_concurrent=CONCURRENT_LIMIT,
                 min_interval=REQUEST_DELAY,
             )
+            content_client = build_client(
+                content_client_cls,
+                runtime.session,
+                max_concurrent=CONCURRENT_LIMIT,
+                min_interval=REQUEST_DELAY,
+            )
+            content_cache = PaperContentCache(
+                cache_root=Path(CONTENT_CACHE_DIR),
+                content_client=content_client,
+            )
 
             result = await export_arxiv_relations_to_csv(
                 arxiv_input,
@@ -62,6 +75,7 @@ async def run_arxiv_relations_mode(
                 openalex_client=openalex_client,
                 discovery_client=runtime.discovery_client,
                 github_client=runtime.github_client,
+                content_cache=content_cache,
                 relation_resolution_cache=runtime.relation_resolution_cache,
                 arxiv_relation_no_arxiv_recheck_days=config["arxiv_relation_no_arxiv_recheck_days"],
                 status_callback=lambda message: print(message, flush=True),
