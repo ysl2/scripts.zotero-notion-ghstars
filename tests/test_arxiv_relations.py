@@ -455,6 +455,194 @@ async def test_normalize_related_works_does_not_negative_cache_api_request_failu
 
 
 @pytest.mark.anyio
+async def test_normalize_related_works_uses_openalex_crosswalk_before_arxiv_and_hf_fallbacks():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    events: list[tuple] = []
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="Example Published Paper",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1145/example",
+                landing_page_url="https://publisher.example/paper",
+                openalex_url="https://openalex.org/WX1",
+            )
+
+        async def find_related_work_preprint_arxiv_url(self, work: dict, *, title: str):
+            events.append(("openalex_crosswalk", title))
+            assert work["id"] == "https://openalex.org/WX1"
+            assert work["display_name"] == "Example Published Paper"
+            return "https://arxiv.org/abs/2401.12345"
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            raise AssertionError("OpenAlex crosswalk hits should bypass arXiv title search")
+
+        async def get_title(self, arxiv_identifier: str):
+            events.append(("title_lookup", arxiv_identifier))
+            assert arxiv_identifier == "https://arxiv.org/abs/2401.12345"
+            return "Example Preprint Title", None
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
+            raise AssertionError("OpenAlex crosswalk hits should bypass Hugging Face fallback")
+
+    class TrackingRelationResolutionCache(FakeRelationResolutionCache):
+        def record_resolution(self, *, key_type: str, key_value: str, arxiv_url: str | None) -> None:
+            events.append(("cache_record", key_type, key_value, arxiv_url))
+            super().record_resolution(key_type=key_type, key_value=key_value, arxiv_url=arxiv_url)
+
+    cache = TrackingRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R-openalex-crosswalk"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [
+        PaperSeed(
+            name="Example Preprint Title",
+            url="https://arxiv.org/abs/2401.12345",
+        )
+    ]
+    assert cache.record_calls == [
+        ("openalex_work", "https://openalex.org/WX1", "https://arxiv.org/abs/2401.12345"),
+        ("doi", "https://doi.org/10.1145/example", "https://arxiv.org/abs/2401.12345"),
+    ]
+    assert events == [
+        ("openalex_crosswalk", "Example Published Paper"),
+        ("title_lookup", "https://arxiv.org/abs/2401.12345"),
+        ("cache_record", "openalex_work", "https://openalex.org/WX1", "https://arxiv.org/abs/2401.12345"),
+        ("cache_record", "doi", "https://doi.org/10.1145/example", "https://arxiv.org/abs/2401.12345"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_normalize_related_works_openalex_crosswalk_miss_runs_before_arxiv_and_hf_fallback():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    events: list[tuple] = []
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="Example Published Paper",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1145/example",
+                landing_page_url="https://publisher.example/paper",
+                openalex_url="https://openalex.org/WX2",
+            )
+
+        async def find_related_work_preprint_arxiv_url(self, work: dict, *, title: str):
+            events.append(("openalex_crosswalk", title))
+            assert work["id"] == "https://openalex.org/WX2"
+            return None
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            events.append(("arxiv_title_search", title))
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("No title lookup should run after a full miss")
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
+            events.append(("hf_search_json", title, limit))
+            return [], None
+
+    class TrackingRelationResolutionCache(FakeRelationResolutionCache):
+        def record_resolution(self, *, key_type: str, key_value: str, arxiv_url: str | None) -> None:
+            events.append(("cache_record", key_type, key_value, arxiv_url))
+            super().record_resolution(key_type=key_type, key_value=key_value, arxiv_url=arxiv_url)
+
+    cache = TrackingRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R-openalex-crosswalk-miss"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [PaperSeed(name="Example Published Paper", url="https://doi.org/10.1145/example")]
+    assert cache.record_calls == [
+        ("openalex_work", "https://openalex.org/WX2", None),
+        ("doi", "https://doi.org/10.1145/example", None),
+    ]
+    assert events == [
+        ("openalex_crosswalk", "Example Published Paper"),
+        ("arxiv_title_search", "Example Published Paper"),
+        ("hf_search_json", "Example Published Paper", 1),
+        ("cache_record", "openalex_work", "https://openalex.org/WX2", None),
+        ("cache_record", "doi", "https://doi.org/10.1145/example", None),
+    ]
+
+
+@pytest.mark.anyio
+async def test_normalize_related_works_does_not_negative_cache_when_openalex_crosswalk_errors_and_other_fallbacks_miss():
+    from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
+
+    class FakeOpenAlexClient:
+        def build_related_work_candidate(self, work: dict):
+            return RelatedWorkCandidate(
+                title="Example Published Paper",
+                direct_arxiv_url=None,
+                doi_url="https://doi.org/10.1145/example",
+                landing_page_url="https://publisher.example/paper",
+                openalex_url="https://openalex.org/WX3",
+            )
+
+        async def find_related_work_preprint_arxiv_url(self, work: dict, *, title: str):
+            raise RuntimeError("OpenAlex API error (429)")
+
+    class FakeArxivClient:
+        async def get_arxiv_id_by_title(self, title: str):
+            raise AssertionError("Relation mode should not use legacy HTML title search")
+
+        async def get_arxiv_id_by_title_from_api(self, title: str):
+            return None, None, "No arXiv ID found from title search"
+
+        async def get_title(self, arxiv_identifier: str):
+            raise AssertionError("No title lookup should run after a full miss")
+
+    class FakeDiscoveryClient:
+        huggingface_token = "hf-token"
+
+        async def get_huggingface_paper_search_results(self, title: str, *, limit: int = 1):
+            return [], None
+
+    cache = FakeRelationResolutionCache()
+    seeds = await normalize_related_works_to_seeds(
+        [{"id": "R-openalex-crosswalk-error"}],
+        openalex_client=FakeOpenAlexClient(),
+        arxiv_client=FakeArxivClient(),
+        discovery_client=FakeDiscoveryClient(),
+        relation_resolution_cache=cache,
+        arxiv_relation_no_arxiv_recheck_days=30,
+    )
+
+    assert seeds == [PaperSeed(name="Example Published Paper", url="https://doi.org/10.1145/example")]
+    assert cache.record_calls == []
+
+
+@pytest.mark.anyio
 async def test_normalize_related_works_uses_hf_fallback_after_arxiv_api_miss():
     from src.arxiv_relations.pipeline import normalize_related_works_to_seeds
 

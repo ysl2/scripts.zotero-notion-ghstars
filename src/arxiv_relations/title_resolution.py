@@ -1,5 +1,8 @@
+import asyncio
 import re
 from dataclasses import dataclass
+
+import aiohttp
 
 from src.shared.arxiv import normalize_title_for_matching
 from src.shared.paper_identity import build_arxiv_abs_url
@@ -79,8 +82,26 @@ async def resolve_related_work_title_to_arxiv(
     title: str,
     *,
     arxiv_client,
+    openalex_client=None,
+    openalex_work=None,
     discovery_client=None,
 ) -> RelationTitleResolution:
+    openalex_crosswalk_transient_failure = False
+    openalex_crosswalk = getattr(openalex_client, "find_related_work_preprint_arxiv_url", None)
+    if callable(openalex_crosswalk) and isinstance(openalex_work, dict):
+        try:
+            openalex_arxiv_url = await openalex_crosswalk(openalex_work, title=title)
+        except (RuntimeError, aiohttp.ClientError, asyncio.TimeoutError):
+            openalex_crosswalk_transient_failure = True
+        else:
+            if openalex_arxiv_url:
+                matched_title, _ = await arxiv_client.get_title(openalex_arxiv_url)
+                return RelationTitleResolution(
+                    arxiv_url=openalex_arxiv_url,
+                    resolved_title=matched_title or title,
+                    negative_cacheable=False,
+                )
+
     arxiv_id, _source, arxiv_error = await arxiv_client.get_arxiv_id_by_title_from_api(title)
     if arxiv_id:
         matched_title, _ = await arxiv_client.get_title(arxiv_id)
@@ -114,5 +135,7 @@ async def resolve_related_work_title_to_arxiv(
     return RelationTitleResolution(
         arxiv_url=None,
         resolved_title=None,
-        negative_cacheable=arxiv_definitive_no_match and definitive_no_match,
+        negative_cacheable=(
+            not openalex_crosswalk_transient_failure and arxiv_definitive_no_match and definitive_no_match
+        ),
     )

@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from src.shared.arxiv import normalize_title_for_matching
 from src.shared.http import MAX_RETRIES, RateLimiter
 from src.shared.paper_identity import build_arxiv_abs_url, normalize_arxiv_url
 from src.shared.papers import PaperSeed
@@ -54,6 +55,47 @@ class OpenAlexClient:
         payload = await self._get_json(OPENALEX_WORKS_URL, params=params)
         results = payload.get("results") or []
         return results[0] if results else None
+
+    async def find_related_work_preprint_arxiv_url(
+        self,
+        work: dict[str, Any],
+        *,
+        title: str,
+    ) -> str | None:
+        current_work_id = self._extract_work_id(work.get("id"))
+        search_title = " ".join(title.split()).strip()
+        normalized_title = normalize_title_for_matching(search_title)
+        if not current_work_id or not normalized_title:
+            return None
+
+        payload = await self._get_json(
+            OPENALEX_WORKS_URL,
+            params={
+                "search": search_title,
+                "per_page": OPENALEX_SEARCH_PAGE_SIZE,
+            },
+        )
+        results = payload.get("results")
+        if not isinstance(results, list):
+            return None
+
+        for candidate in results:
+            if not isinstance(candidate, dict):
+                continue
+
+            candidate_work_id = self._extract_work_id(candidate.get("id"))
+            if current_work_id and candidate_work_id == current_work_id:
+                continue
+
+            candidate_title = candidate.get("display_name") or candidate.get("title") or ""
+            if normalize_title_for_matching(candidate_title) != normalized_title:
+                continue
+
+            canonical_arxiv_url = self._canonical_arxiv_url(candidate)
+            if canonical_arxiv_url:
+                return canonical_arxiv_url
+
+        return None
 
     async def fetch_referenced_works(self, work: dict[str, Any]) -> list[dict[str, Any]]:
         referenced = work.get("referenced_works") or []

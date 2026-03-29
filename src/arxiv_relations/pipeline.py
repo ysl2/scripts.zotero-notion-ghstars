@@ -91,6 +91,7 @@ async def _resolve_related_work_row(
     candidate,
     *,
     arxiv_client,
+    openalex_client=None,
     discovery_client=None,
     relation_resolution_cache=None,
     arxiv_relation_no_arxiv_recheck_days: int = 30,
@@ -136,6 +137,15 @@ async def _resolve_related_work_row(
     resolution = await resolve_related_work_title_to_arxiv(
         candidate.title,
         arxiv_client=arxiv_client,
+        openalex_client=openalex_client,
+        openalex_work=(
+            {
+                "id": candidate.openalex_url,
+                "display_name": candidate.title,
+            }
+            if candidate.openalex_url
+            else None
+        ),
         discovery_client=discovery_client,
     )
     if resolution.arxiv_url:
@@ -169,6 +179,7 @@ async def _resolve_related_work_rows(
     candidates: list,
     *,
     arxiv_client,
+    openalex_client=None,
     discovery_client=None,
     relation_resolution_cache=None,
     arxiv_relation_no_arxiv_recheck_days: int = 30,
@@ -178,6 +189,7 @@ async def _resolve_related_work_rows(
             _resolve_related_work_row(
                 candidate,
                 arxiv_client=arxiv_client,
+                openalex_client=openalex_client,
                 discovery_client=discovery_client,
                 relation_resolution_cache=relation_resolution_cache,
                 arxiv_relation_no_arxiv_recheck_days=arxiv_relation_no_arxiv_recheck_days,
@@ -220,6 +232,7 @@ async def normalize_related_works_to_seeds(
     normalized_rows = await _resolve_related_work_rows(
         candidates,
         arxiv_client=arxiv_client,
+        openalex_client=openalex_client,
         discovery_client=discovery_client,
         relation_resolution_cache=relation_resolution_cache,
         arxiv_relation_no_arxiv_recheck_days=arxiv_relation_no_arxiv_recheck_days,

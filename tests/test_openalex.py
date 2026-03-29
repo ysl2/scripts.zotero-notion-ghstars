@@ -50,6 +50,127 @@ async def test_title_search_returns_first_result_by_relevance():
     assert session.calls[0]["params"]["per_page"] == 5
 
 
+@pytest.mark.anyio
+async def test_find_related_work_preprint_accepts_candidate_with_explicit_arxiv_location():
+    work = {
+        "id": "https://openalex.org/W-published",
+        "display_name": "Example Published Paper",
+    }
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W-published",
+                            "display_name": "Example Published Paper",
+                            "doi": "https://doi.org/10.1145/example",
+                        },
+                        {
+                            "id": "https://openalex.org/W-preprint",
+                            "display_name": "Example Published Paper",
+                            "locations": [
+                                {
+                                    "landing_page_url": "https://arxiv.org/abs/2401.12345v2",
+                                }
+                            ],
+                        },
+                    ]
+                }
+            )
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    result = await client.find_related_work_preprint_arxiv_url(work, title="Example Published Paper")
+
+    assert result == "https://arxiv.org/abs/2401.12345"
+    assert session.calls[0]["params"]["search"] == "Example Published Paper"
+    assert session.calls[0]["params"]["per_page"] == 5
+
+
+@pytest.mark.anyio
+async def test_find_related_work_preprint_rejects_publisher_only_candidates():
+    work = {
+        "id": "https://openalex.org/W-published",
+        "display_name": "Example Published Paper",
+    }
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W-publisher-version",
+                            "display_name": "Example Published Paper",
+                            "doi": "https://doi.org/10.1145/example",
+                            "locations": [
+                                {
+                                    "landing_page_url": "https://publisher.example/paper",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    result = await client.find_related_work_preprint_arxiv_url(work, title="Example Published Paper")
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_find_related_work_preprint_rejects_similar_title_without_explicit_arxiv_evidence():
+    work = {
+        "id": "https://openalex.org/W-published",
+        "display_name": "Example Published Paper",
+    }
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W-similar",
+                            "display_name": "Example Published Paper Extended",
+                            "doi": "https://doi.org/10.1145/example-extended",
+                        }
+                    ]
+                }
+            )
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    result = await client.find_related_work_preprint_arxiv_url(work, title="Example Published Paper")
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_find_related_work_preprint_returns_none_for_malformed_or_empty_payloads():
+    work = {
+        "id": "https://openalex.org/W-published",
+        "display_name": "Example Published Paper",
+    }
+    session = FakeSession(
+        [
+            FakeResponse({"unexpected": "payload"}),
+            FakeResponse({"results": []}),
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    malformed_result = await client.find_related_work_preprint_arxiv_url(work, title="Example Published Paper")
+    empty_result = await client.find_related_work_preprint_arxiv_url(work, title="Example Published Paper")
+
+    assert malformed_result is None
+    assert empty_result is None
+
+
 def test_extracts_canonical_arxiv_url_from_related_work():
     session = FakeSession([])
     client = OpenAlexClient(session, min_interval=0)
