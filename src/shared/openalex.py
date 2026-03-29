@@ -15,7 +15,10 @@ from src.shared.papers import PaperSeed
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 OPENALEX_SEARCH_PAGE_SIZE = 5
 OPENALEX_CITED_BY_PAGE_SIZE = 200
+OPENALEX_REFERENCED_WORKS_CHUNK_SIZE = 50
 OPENALEX_RETRY_STATUSES = {429, 500, 502, 503, 504}
+OPENALEX_TARGET_WORK_SELECT = "id,referenced_works"
+OPENALEX_RELATION_WORK_SELECT = "id,display_name,title,ids,doi,locations"
 ARXIV_DOI_PATTERN = re.compile(r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5})(?:v\d+)?", re.IGNORECASE)
 
 
@@ -51,7 +54,11 @@ class OpenAlexClient:
         self.rate_limiter = RateLimiter(min_interval)
 
     async def search_first_work(self, title: str) -> dict[str, Any] | None:
-        params = {"search": title, "per_page": OPENALEX_SEARCH_PAGE_SIZE}
+        params = {
+            "search": title,
+            "per_page": OPENALEX_SEARCH_PAGE_SIZE,
+            "select": OPENALEX_TARGET_WORK_SELECT,
+        }
         payload = await self._get_json(OPENALEX_WORKS_URL, params=params)
         results = payload.get("results") or []
         return results[0] if results else None
@@ -73,6 +80,7 @@ class OpenAlexClient:
             params={
                 "search": search_title,
                 "per_page": OPENALEX_SEARCH_PAGE_SIZE,
+                "select": OPENALEX_RELATION_WORK_SELECT,
             },
         )
         results = payload.get("results")
@@ -112,9 +120,29 @@ class OpenAlexClient:
         if not work_ids:
             return []
 
-        tasks = [self._fetch_referenced_work(work_id) for work_id in work_ids]
-        hydrated = await asyncio.gather(*tasks)
-        return [work for work in hydrated if work is not None]
+        hydrated_by_id: dict[str, dict[str, Any]] = {}
+        for work_id_chunk in self._chunk_values(work_ids, OPENALEX_REFERENCED_WORKS_CHUNK_SIZE):
+            payload = await self._get_json(
+                OPENALEX_WORKS_URL,
+                params={
+                    "filter": f"openalex:{'|'.join(work_id_chunk)}",
+                    "per_page": len(work_id_chunk),
+                    "select": OPENALEX_RELATION_WORK_SELECT,
+                },
+            )
+            results = payload.get("results")
+            if not isinstance(results, list):
+                continue
+
+            for related_work in results:
+                if not isinstance(related_work, dict):
+                    continue
+                related_work_id = self._extract_work_id(related_work.get("id"))
+                if not related_work_id or related_work_id in hydrated_by_id:
+                    continue
+                hydrated_by_id[related_work_id] = related_work
+
+        return [hydrated_by_id[work_id] for work_id in work_ids if work_id in hydrated_by_id]
 
     async def fetch_citations(self, work: dict[str, Any]) -> list[dict[str, Any]]:
         work_id = self._extract_work_id(work.get("id"))
@@ -127,6 +155,7 @@ class OpenAlexClient:
             params: dict[str, Any] = {
                 "filter": f"cites:{work_id}",
                 "per_page": OPENALEX_CITED_BY_PAGE_SIZE,
+                "select": OPENALEX_RELATION_WORK_SELECT,
             }
             if cursor:
                 params["cursor"] = cursor
@@ -185,14 +214,6 @@ class OpenAlexClient:
                     raise
 
         raise RuntimeError("OpenAlex API request failed")
-
-    async def _fetch_referenced_work(self, work_id: str) -> dict[str, Any] | None:
-        try:
-            return await self._get_json(f"{OPENALEX_WORKS_URL}/{work_id}")
-        except RuntimeError as exc:
-            if self._is_openalex_not_found_error(exc):
-                return None
-            raise
 
     def _build_headers(self) -> dict[str, str]:
         headers = {"User-Agent": "scripts.ghstars"}
@@ -269,6 +290,12 @@ class OpenAlexClient:
         return normalized
 
     @staticmethod
+    def _chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
+        if chunk_size <= 0:
+            return [values]
+        return [values[index : index + chunk_size] for index in range(0, len(values), chunk_size)]
+
+    @staticmethod
     def _extract_work_id(identifier: str | None) -> str | None:
         if not identifier:
             return None
@@ -291,7 +318,3 @@ class OpenAlexClient:
             return None
 
         return segments[-1]
-
-    @staticmethod
-    def _is_openalex_not_found_error(exc: RuntimeError) -> bool:
-        return str(exc) == "OpenAlex API error (404)"

@@ -48,6 +48,7 @@ async def test_title_search_returns_first_result_by_relevance():
     assert result == first
     assert session.calls[0]["params"]["search"] == "relevant title"
     assert session.calls[0]["params"]["per_page"] == 5
+    assert session.calls[0]["params"]["select"] == "id,referenced_works"
 
 
 @pytest.mark.anyio
@@ -87,6 +88,7 @@ async def test_find_related_work_preprint_accepts_candidate_with_explicit_arxiv_
     assert result == "https://arxiv.org/abs/2401.12345"
     assert session.calls[0]["params"]["search"] == "Example Published Paper"
     assert session.calls[0]["params"]["per_page"] == 5
+    assert session.calls[0]["params"]["select"] == "id,display_name,title,ids,doi,locations"
 
 
 @pytest.mark.anyio
@@ -228,30 +230,46 @@ def test_build_related_work_candidate_retains_non_arxiv_fallback_fields():
 
 
 @pytest.mark.anyio
-async def test_references_hydrate_from_referenced_work_ids():
-    responses = [
-        FakeResponse({"id": "https://openalex.org/W1", "display_name": "Ref 1"}),
-        FakeResponse({"id": "https://openalex.org/W2", "display_name": "Ref 2"}),
-    ]
-    session = FakeSession(responses)
+async def test_references_hydrate_from_referenced_work_ids_via_single_batch_query():
+    response = FakeResponse(
+        {
+            "results": [
+                {"id": "https://openalex.org/W2", "display_name": "Ref 2"},
+                {"id": "https://openalex.org/W1", "display_name": "Ref 1"},
+            ]
+        }
+    )
+    session = FakeSession([response])
     client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
     work = {"referenced_works": ["https://openalex.org/works/W1", "W2"]}
 
     hydrated = await client.fetch_referenced_works(work)
 
-    assert hydrated == [responses[0]._json_data, responses[1]._json_data]
-    assert len(session.calls) == 2
-    assert "W1" in session.calls[0]["url"]
+    assert hydrated == [
+        {"id": "https://openalex.org/W1", "display_name": "Ref 1"},
+        {"id": "https://openalex.org/W2", "display_name": "Ref 2"},
+    ]
+    assert len(session.calls) == 1
+    assert session.calls[0]["url"] == "https://api.openalex.org/works"
+    assert session.calls[0]["params"]["filter"] == "openalex:W1|W2"
+    assert session.calls[0]["params"]["per_page"] == 2
+    assert session.calls[0]["params"]["select"] == "id,display_name,title,ids,doi,locations"
 
 
 @pytest.mark.anyio
-async def test_references_skip_single_missing_work_during_hydration():
-    responses = [
-        FakeResponse({"id": "https://openalex.org/W1", "display_name": "Ref 1"}),
-        FakeResponse(status=404),
-        FakeResponse({"id": "https://openalex.org/W3", "display_name": "Ref 3"}),
-    ]
-    session = FakeSession(responses)
+async def test_references_skip_missing_work_ids_from_batch_results():
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "results": [
+                        {"id": "https://openalex.org/W3", "display_name": "Ref 3"},
+                        {"id": "https://openalex.org/W1", "display_name": "Ref 1"},
+                    ]
+                }
+            )
+        ]
+    )
     client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
     work = {
         "referenced_works": [
@@ -263,9 +281,12 @@ async def test_references_skip_single_missing_work_during_hydration():
 
     hydrated = await client.fetch_referenced_works(work)
 
-    assert hydrated == [responses[0]._json_data, responses[2]._json_data]
-    assert len(session.calls) == 3
-    assert session.calls[1]["url"].endswith("/W404")
+    assert hydrated == [
+        {"id": "https://openalex.org/W1", "display_name": "Ref 1"},
+        {"id": "https://openalex.org/W3", "display_name": "Ref 3"},
+    ]
+    assert len(session.calls) == 1
+    assert session.calls[0]["params"]["filter"] == "openalex:W1|W404|W3"
 
 
 @pytest.mark.anyio
@@ -276,6 +297,41 @@ async def test_references_still_raise_non_404_hydration_errors():
 
     with pytest.raises(RuntimeError, match=r"OpenAlex API error \(403\)"):
         await client.fetch_referenced_works(work)
+
+
+@pytest.mark.anyio
+async def test_references_chunk_batch_queries_when_work_id_list_exceeds_chunk_limit(monkeypatch):
+    import src.shared.openalex as openalex_module
+
+    monkeypatch.setattr(openalex_module, "OPENALEX_REFERENCED_WORKS_CHUNK_SIZE", 2)
+    session = FakeSession(
+        [
+            FakeResponse(
+                {
+                    "results": [
+                        {"id": "https://openalex.org/W2", "display_name": "Ref 2"},
+                        {"id": "https://openalex.org/W1", "display_name": "Ref 1"},
+                    ]
+                }
+            ),
+            FakeResponse({"results": [{"id": "https://openalex.org/W3", "display_name": "Ref 3"}]}),
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+    work = {"referenced_works": ["W1", "W2", "W3"]}
+
+    hydrated = await client.fetch_referenced_works(work)
+
+    assert hydrated == [
+        {"id": "https://openalex.org/W1", "display_name": "Ref 1"},
+        {"id": "https://openalex.org/W2", "display_name": "Ref 2"},
+        {"id": "https://openalex.org/W3", "display_name": "Ref 3"},
+    ]
+    assert len(session.calls) == 2
+    assert session.calls[0]["params"]["filter"] == "openalex:W1|W2"
+    assert session.calls[0]["params"]["per_page"] == 2
+    assert session.calls[1]["params"]["filter"] == "openalex:W3"
+    assert session.calls[1]["params"]["per_page"] == 1
 
 
 @pytest.mark.anyio
@@ -292,8 +348,10 @@ async def test_citations_paginate_across_multiple_pages():
     assert session.calls[0]["params"]["per_page"] == 200
     assert session.calls[0]["params"]["filter"] == "cites:W0"
     assert session.calls[0]["params"]["cursor"] == "*"
+    assert session.calls[0]["params"]["select"] == "id,display_name,title,ids,doi,locations"
     assert session.calls[1]["params"]["cursor"] == "abc"
     assert session.calls[1]["params"]["filter"] == "cites:W0"
+    assert session.calls[1]["params"]["select"] == "id,display_name,title,ids,doi,locations"
 
 
 @pytest.mark.anyio
