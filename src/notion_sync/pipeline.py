@@ -1,9 +1,8 @@
 import asyncio
-from types import SimpleNamespace
 
-from src.shared.discovery import resolve_arxiv_id_by_title
-from src.shared.github import extract_owner_repo, is_valid_github_repo_url, normalize_github_url
-from src.shared.paper_identity import extract_arxiv_id
+from src.shared.github import extract_owner_repo, is_valid_github_repo_url
+from src.shared.paper_enrichment import PaperEnrichmentRequest, process_single_paper
+from src.shared.paper_identity import build_arxiv_abs_url, extract_arxiv_id
 from src.shared.progress import print_item_skip, print_item_success
 from src.shared.skip_reasons import is_minor_skip_reason
 
@@ -101,89 +100,40 @@ def get_arxiv_id_from_page(page: dict) -> str | None:
             return arxiv_id
     return None
 
-async def resolve_arxiv_id_for_page(page: dict, discovery_client=None, arxiv_client=None) -> tuple[str | None, str | None, str | None]:
-    arxiv_id = get_arxiv_id_from_page(page)
-    if arxiv_id:
-        return arxiv_id, "url_field", None
-
-    title = get_page_title(page)
-    if not title:
-        return None, None, "No arXiv ID found for discovery lookup"
-    if arxiv_client is None and discovery_client is None:
-        return None, None, "No arXiv ID found for discovery lookup"
-
-    arxiv_id, source, error = await resolve_arxiv_id_by_title(
-        title,
-        discovery_client=discovery_client,
-        arxiv_client=arxiv_client,
-    )
-    if arxiv_id:
-        return arxiv_id, source, None
-    return None, None, error or "No arXiv ID found from title search"
-
-
-async def resolve_repo_for_page(page: dict, discovery_client, arxiv_client=None) -> dict:
+def build_page_enrichment_request(page: dict) -> tuple[PaperEnrichmentRequest | None, bool, str | None]:
     github_value = get_github_url_from_page(page)
     github_state = classify_github_value(github_value)
+    title = get_page_title(page)
+    arxiv_id = get_arxiv_id_from_page(page)
+    raw_url = build_arxiv_abs_url(arxiv_id) if arxiv_id else ""
 
     if github_state == "valid_github":
-        return {
-            "github_url": normalize_github_url(github_value),
-            "source": "existing",
-            "needs_github_update": False,
-            "reason": None,
-        }
+        return (
+            PaperEnrichmentRequest(
+                title=title,
+                raw_url=raw_url,
+                existing_github_url=github_value,
+                allow_title_search=False,
+                allow_github_discovery=False,
+            ),
+            False,
+            None,
+        )
 
     if github_state == "other":
-        return {
-            "github_url": None,
-            "source": None,
-            "needs_github_update": False,
-            "reason": "Unsupported Github field content",
-        }
+        return None, False, "Unsupported Github field content"
 
-    resolver = getattr(discovery_client, "resolve_github_url", None)
-    if not callable(resolver):
-        return {
-            "github_url": None,
-            "source": None,
-            "needs_github_update": False,
-            "reason": "No fallback discovery token configured",
-        }
-
-    arxiv_id, arxiv_source, error = await resolve_arxiv_id_for_page(
-        page,
-        discovery_client=discovery_client,
-        arxiv_client=arxiv_client,
+    return (
+        PaperEnrichmentRequest(
+            title=title,
+            raw_url=raw_url,
+            existing_github_url=None,
+            allow_title_search=True,
+            allow_github_discovery=True,
+        ),
+        True,
+        None,
     )
-    if not arxiv_id:
-        return {
-            "github_url": None,
-            "source": None,
-            "arxiv_source": arxiv_source,
-            "needs_github_update": False,
-            "reason": error or "No arXiv ID found for discovery lookup",
-        }
-
-    title = get_page_title(page)
-    seed = SimpleNamespace(name=title, url=f"https://arxiv.org/abs/{arxiv_id}")
-    github_url = await resolver(seed)
-    if github_url:
-        return {
-            "github_url": github_url,
-            "source": "discovered",
-            "arxiv_source": arxiv_source,
-            "needs_github_update": True,
-            "reason": None,
-        }
-
-    return {
-        "github_url": None,
-        "source": None,
-        "arxiv_source": arxiv_source,
-        "needs_github_update": False,
-        "reason": "No Github URL found from discovery",
-    }
 
 
 def format_resolution_source_label(source: str | None) -> str | None:
@@ -205,6 +155,7 @@ async def process_page(
     results: dict,
     lock: asyncio.Lock,
     arxiv_client=None,
+    content_cache=None,
 ) -> None:
     page_id = page["id"]
     current_stars = get_current_stars_from_page(page)
@@ -212,32 +163,39 @@ async def process_page(
     title = get_page_title(page) or page_id
     notion_url = get_page_url(page)
 
-    resolution = await resolve_repo_for_page(page, discovery_client, arxiv_client)
-    github_url = resolution["github_url"]
-    if not github_url:
-        reason = resolution["reason"]
+    request, needs_github_update, local_reason = build_page_enrichment_request(page)
+    if request is None:
         async with lock:
             print_item_skip(
                 index,
                 total,
                 title,
-                reason,
-                minor=is_minor_skip_reason(reason),
+                local_reason,
+                minor=is_minor_skip_reason(local_reason),
             )
             results["skipped"].append(
-                {"title": title, "github_url": None, "detail_url": notion_url, "reason": reason}
+                {"title": title, "github_url": None, "detail_url": notion_url, "reason": local_reason}
             )
         return
 
-    owner_repo = extract_owner_repo(github_url)
-    if not owner_repo:
-        reason = "Discovered URL is not a valid GitHub repository"
+    result = await process_single_paper(
+        request,
+        discovery_client=discovery_client,
+        github_client=github_client,
+        arxiv_client=arxiv_client,
+        content_cache=content_cache,
+    )
+    github_url = result.github_url
+    if result.reason is not None or not github_url:
+        reason = result.reason or "No Github URL found from discovery"
+        owner_repo = extract_owner_repo(github_url) if github_url else None
         async with lock:
             print_item_skip(
                 index,
                 total,
                 title,
                 reason,
+                owner_repo=owner_repo,
                 minor=is_minor_skip_reason(reason),
             )
             results["skipped"].append(
@@ -245,27 +203,13 @@ async def process_page(
             )
         return
 
-    owner, repo = owner_repo
-    new_stars, error = await github_client.get_star_count(owner, repo)
-    if error:
-        async with lock:
-            print_item_skip(
-                index,
-                total,
-                title,
-                error,
-                owner_repo=owner_repo,
-                minor=is_minor_skip_reason(error),
-            )
-            results["skipped"].append(
-                {"title": title, "github_url": github_url, "detail_url": notion_url, "reason": error}
-            )
-        return
+    owner_repo = extract_owner_repo(github_url)
+    new_stars = result.stars
 
     try:
         await notion_client.update_page_properties(
             page_id,
-            github_url=github_url if resolution["needs_github_update"] else None,
+            github_url=github_url if needs_github_update and result.github_source == "discovered" else None,
             stars_count=new_stars,
             github_property_type=github_property_type,
         )
@@ -293,7 +237,7 @@ async def process_page(
             owner_repo=owner_repo,
             current_stars=current_stars,
             new_stars=new_stars,
-            source_label=format_resolution_source_label(resolution["source"]),
-            github_url_set=github_url if resolution["needs_github_update"] else None,
+            source_label=format_resolution_source_label(result.github_source),
+            github_url_set=github_url if needs_github_update and result.github_source == "discovered" else None,
         )
         results["updated"] += 1

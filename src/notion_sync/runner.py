@@ -6,12 +6,14 @@ import aiohttp
 from src.notion_sync.config import load_config_from_env
 from src.notion_sync.notion_client import NotionClient
 from src.notion_sync.pipeline import process_page
+from src.shared.alphaxiv_content import AlphaXivContentClient
 from src.shared.arxiv import ArxivClient
 from src.shared.discovery import DiscoveryClient
 from src.shared.github import GitHubClient, resolve_github_min_interval
+from src.shared.paper_content import PaperContentCache
 from src.shared.progress import Colors, colored, print_summary
-from src.shared.runtime import open_runtime_clients
-from src.shared.settings import DEFAULT_CONCURRENT_LIMIT
+from src.shared.runtime import build_client, open_runtime_clients
+from src.shared.settings import CONTENT_CACHE_DIR, DEFAULT_CONCURRENT_LIMIT
 from src.shared.skip_reasons import is_minor_skip_reason
 
 
@@ -30,6 +32,7 @@ async def run_notion_mode(
     discovery_client_cls=DiscoveryClient,
     github_client_cls=GitHubClient,
     notion_client_cls=NotionClient,
+    content_client_cls=AlphaXivContentClient,
 ) -> int:
     config = load_config_from_env(dict(os.environ))
 
@@ -59,6 +62,16 @@ async def run_notion_mode(
             max_concurrent=ARXIV_CONCURRENT_LIMIT,
             min_interval=REQUEST_DELAY,
         )
+        content_client = build_client(
+            content_client_cls,
+            runtime.session,
+            max_concurrent=CONCURRENT_LIMIT,
+            min_interval=REQUEST_DELAY,
+        )
+        content_cache = PaperContentCache(
+            cache_root=CONTENT_CACHE_DIR,
+            content_client=content_client,
+        )
 
         async with notion_client_cls(config["notion_token"], NOTION_CONCURRENT_LIMIT) as notion_client:
             data_source_id = await notion_client.get_data_source_id(config["database_id"])
@@ -85,6 +98,7 @@ async def run_notion_mode(
                     results=results,
                     lock=lock,
                     arxiv_client=arxiv_client,
+                    content_cache=content_cache,
                 )
                 for i, page in enumerate(pages, 1)
             ]

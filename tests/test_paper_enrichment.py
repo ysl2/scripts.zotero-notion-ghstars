@@ -1,0 +1,272 @@
+import types
+from unittest.mock import AsyncMock
+
+import pytest
+
+from src.shared.paper_enrichment import PaperEnrichmentRequest, process_single_paper
+
+
+class RecordingContentCache:
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def ensure_local_content_cache(self, canonical_arxiv_url: str) -> None:
+        self.calls.append(canonical_arxiv_url)
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_prefers_existing_valid_github_and_warms_content():
+    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(17, None)))
+    content_cache = RecordingContentCache()
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper A",
+            raw_url="https://arxiv.org/pdf/2603.20000v2.pdf",
+            existing_github_url="https://github.com/foo/bar",
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+        content_cache=content_cache,
+    )
+
+    assert result.title == "Paper A"
+    assert result.raw_url == "https://arxiv.org/pdf/2603.20000v2.pdf"
+    assert result.normalized_url == "https://arxiv.org/abs/2603.20000"
+    assert result.github_url == "https://github.com/foo/bar"
+    assert result.github_source == "existing"
+    assert result.stars == 17
+    assert result.reason is None
+    assert content_cache.calls == ["https://arxiv.org/abs/2603.20000"]
+    discovery_client.resolve_github_url.assert_not_awaited()
+    github_client.get_star_count.assert_awaited_once_with("foo", "bar")
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_discovers_github_when_allowed():
+    discovery_client = types.SimpleNamespace(
+        resolve_github_url=AsyncMock(return_value="https://github.com/foo/discovered")
+    )
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(42, None)))
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper B",
+            raw_url="https://arxiv.org/abs/2603.10000v3",
+            existing_github_url="",
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+    )
+
+    assert result.normalized_url == "https://arxiv.org/abs/2603.10000"
+    assert result.github_url == "https://github.com/foo/discovered"
+    assert result.github_source == "discovered"
+    assert result.stars == 42
+    assert result.reason is None
+    discovery_client.resolve_github_url.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_rejects_invalid_existing_github_without_discovery():
+    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock())
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper C",
+            raw_url="https://arxiv.org/abs/2603.10001",
+            existing_github_url="https://example.com/not-github",
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+    )
+
+    assert result.github_source == "existing"
+    assert result.reason == "Existing Github URL is not a valid GitHub repository"
+    discovery_client.resolve_github_url.assert_not_awaited()
+    github_client.get_star_count.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_rejects_invalid_discovered_github():
+    discovery_client = types.SimpleNamespace(
+        resolve_github_url=AsyncMock(return_value="https://example.com/not-github")
+    )
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock())
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper D",
+            raw_url="https://arxiv.org/abs/2603.10002",
+            existing_github_url="",
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+    )
+
+    assert result.github_source == "discovered"
+    assert result.github_url == "https://example.com/not-github"
+    assert result.reason == "Discovered URL is not a valid GitHub repository"
+    github_client.get_star_count.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_reports_discovery_miss():
+    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock(return_value=None))
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock())
+    content_cache = RecordingContentCache()
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper E",
+            raw_url="https://arxiv.org/abs/2603.10003v1",
+            existing_github_url="",
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+        content_cache=content_cache,
+    )
+
+    assert result.normalized_url == "https://arxiv.org/abs/2603.10003"
+    assert result.github_url is None
+    assert result.reason == "No Github URL found from discovery"
+    assert content_cache.calls == []
+    github_client.get_star_count.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("allow_title_search", [False, True])
+async def test_process_single_paper_respects_title_search_flag(allow_title_search: bool):
+    discovery_client = types.SimpleNamespace(
+        huggingface_token="",
+        resolve_github_url=AsyncMock(return_value="https://github.com/foo/from-title"),
+    )
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(7, None)))
+    arxiv_client = types.SimpleNamespace(
+        get_arxiv_id_by_title=AsyncMock(return_value=("2603.10004", "title_search_arxiv", None))
+    )
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper F",
+            raw_url="https://example.com/no-arxiv",
+            existing_github_url="",
+            allow_title_search=allow_title_search,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+        arxiv_client=arxiv_client,
+    )
+
+    if allow_title_search:
+        assert result.normalized_url == "https://arxiv.org/abs/2603.10004"
+        assert result.github_url == "https://github.com/foo/from-title"
+        assert result.reason is None
+        discovery_client.resolve_github_url.assert_awaited_once()
+        github_client.get_star_count.assert_awaited_once_with("foo", "from-title")
+        arxiv_client.get_arxiv_id_by_title.assert_awaited_once_with("Paper F")
+    else:
+        assert result.normalized_url is None
+        assert result.github_url is None
+        assert result.reason == "No valid arXiv URL found"
+        discovery_client.resolve_github_url.assert_not_awaited()
+        github_client.get_star_count.assert_not_awaited()
+        arxiv_client.get_arxiv_id_by_title.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_warms_content_before_github_stars_and_keeps_warming_on_star_failure():
+    events: list[str] = []
+
+    class OrderedContentCache:
+        async def ensure_local_content_cache(self, canonical_arxiv_url: str) -> None:
+            assert canonical_arxiv_url == "https://arxiv.org/abs/2603.10005"
+            events.append("content")
+
+    async def get_star_count(owner: str, repo: str):
+        assert (owner, repo) == ("foo", "bar")
+        events.append("stars")
+        return None, "GitHub API error (503)"
+
+    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(side_effect=get_star_count))
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper G",
+            raw_url="https://arxiv.org/abs/2603.10005",
+            existing_github_url="https://github.com/foo/bar",
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+        content_cache=OrderedContentCache(),
+    )
+
+    assert result.github_url == "https://github.com/foo/bar"
+    assert result.stars is None
+    assert result.reason == "GitHub API error (503)"
+    assert events == ["content", "stars"]
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_skips_content_warming_without_valid_repo():
+    content_cache = RecordingContentCache()
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper H",
+            raw_url="https://arxiv.org/abs/2603.10006",
+            existing_github_url="https://example.com/not-github",
+            allow_title_search=False,
+            allow_github_discovery=False,
+        ),
+        discovery_client=types.SimpleNamespace(resolve_github_url=AsyncMock()),
+        github_client=types.SimpleNamespace(get_star_count=AsyncMock()),
+        content_cache=content_cache,
+    )
+
+    assert result.reason == "Existing Github URL is not a valid GitHub repository"
+    assert content_cache.calls == []
+
+
+@pytest.mark.anyio
+async def test_process_single_paper_keeps_repo_and_stars_when_no_canonical_arxiv_identity_exists():
+    content_cache = RecordingContentCache()
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(9, None)))
+
+    result = await process_single_paper(
+        PaperEnrichmentRequest(
+            title="Paper I",
+            raw_url="https://example.com/paper",
+            existing_github_url="https://github.com/foo/bar",
+            allow_title_search=False,
+            allow_github_discovery=False,
+        ),
+        discovery_client=types.SimpleNamespace(resolve_github_url=AsyncMock()),
+        github_client=github_client,
+        content_cache=content_cache,
+    )
+
+    assert result.raw_url == "https://example.com/paper"
+    assert result.normalized_url is None
+    assert result.github_url == "https://github.com/foo/bar"
+    assert result.github_source == "existing"
+    assert result.stars == 9
+    assert result.reason is None
+    assert content_cache.calls == []
+    github_client.get_star_count.assert_awaited_once_with("foo", "bar")

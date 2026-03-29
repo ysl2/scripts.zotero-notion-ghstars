@@ -4,7 +4,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.shared.paper_enrichment import enrich_paper
+from src.shared.paper_enrichment import PaperEnrichmentRequest, process_single_paper
 from src.shared.papers import PaperRecord
 
 
@@ -101,35 +101,21 @@ async def build_csv_row_outcome(
     existing_github = updated_row.get(GITHUB_COLUMN, "") or ""
     current_stars = parse_current_stars(updated_row.get(STARS_COLUMN))
 
-    enrichment_task = asyncio.create_task(
-        enrich_paper(
-            name=name,
-            url=url,
-            existing_github=existing_github,
-            discovery_client=discovery_client,
-            github_client=github_client,
-        )
+    enrichment = await process_single_paper(
+        PaperEnrichmentRequest(
+            title=name,
+            raw_url=url,
+            existing_github_url=existing_github,
+            allow_title_search=False,
+            allow_github_discovery=True,
+        ),
+        discovery_client=discovery_client,
+        github_client=github_client,
+        content_cache=content_cache,
     )
-    overview_task = asyncio.create_task(
-        _ensure_content_path(
-            content_cache,
-            kind="overview",
-            url=url,
-            relative_to=csv_dir,
-        )
-    )
-    abs_task = asyncio.create_task(
-        _ensure_content_path(
-            content_cache,
-            kind="abs",
-            url=url,
-            relative_to=csv_dir,
-        )
-    )
-    enrichment, _overview_path, _abs_path = await asyncio.gather(enrichment_task, overview_task, abs_task)
 
-    if enrichment.url and enrichment.url != url and enrichment.reason != "No valid arXiv URL found":
-        updated_row[URL_COLUMN] = enrichment.url
+    if enrichment.normalized_url and enrichment.normalized_url != url:
+        updated_row[URL_COLUMN] = enrichment.normalized_url
 
     if enrichment.github_url:
         updated_row[GITHUB_COLUMN] = enrichment.github_url
@@ -139,9 +125,9 @@ async def build_csv_row_outcome(
 
     github_url_set = None
     source_label = None
-    if enrichment.source == "existing":
+    if enrichment.github_source == "existing":
         source_label = "existing Github"
-    elif enrichment.source == "discovered":
+    elif enrichment.github_source == "discovered":
         source_label = "Discovered Github"
         if not existing_github.strip():
             github_url_set = enrichment.github_url
@@ -150,7 +136,7 @@ async def build_csv_row_outcome(
         index=index,
         record=PaperRecord(
             name=name,
-            url=updated_row.get(URL_COLUMN, "") or enrichment.url or url,
+            url=updated_row.get(URL_COLUMN, "") or enrichment.normalized_url or url,
             github=updated_row.get(GITHUB_COLUMN, "") or "",
             stars=enrichment.stars if enrichment.reason is None else updated_row.get(STARS_COLUMN, ""),
         ),
@@ -208,18 +194,3 @@ def _normalize_fieldnames(fieldnames: list[str]) -> list[str]:
         if column not in normalized:
             normalized.append(column)
     return normalized
-
-
-async def _ensure_content_path(content_cache, *, kind: str, url: str, relative_to: Path) -> str:
-    if content_cache is None:
-        return ""
-
-    method_name = "ensure_overview_path" if kind == "overview" else "ensure_abs_path"
-    method = getattr(content_cache, method_name, None)
-    if not callable(method):
-        return ""
-
-    try:
-        return await method(url, relative_to=relative_to)
-    except Exception:
-        return ""

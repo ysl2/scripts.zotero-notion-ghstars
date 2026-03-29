@@ -29,9 +29,19 @@ class PaperContentCache:
     async def ensure_abs_path(self, url: str, *, relative_to: Path) -> str:
         return await self._ensure_path("abs", url, relative_to=relative_to)
 
+    async def ensure_local_content_cache(self, url: str) -> None:
+        arxiv_id = self._extract_arxiv_id(url)
+        if not arxiv_id:
+            return
+
+        missing_kinds = [kind for kind in ("overview", "abs") if not self._target_path(kind, arxiv_id).exists()]
+        if not missing_kinds:
+            return
+
+        await asyncio.gather(*(self._ensure_file(kind, arxiv_id) for kind in missing_kinds))
+
     async def _ensure_path(self, kind: str, url: str, *, relative_to: Path) -> str:
-        arxiv_url = normalize_arxiv_url(url)
-        arxiv_id = extract_arxiv_id(arxiv_url or "")
+        arxiv_id = self._extract_arxiv_id(url)
         if not arxiv_id:
             return ""
 
@@ -100,6 +110,11 @@ class PaperContentCache:
     def _target_path(self, kind: str, arxiv_id: str) -> Path:
         subdir = OVERVIEW_CACHE_SUBDIR if kind == "overview" else ABS_CACHE_SUBDIR
         return self.cache_root / subdir / f"{arxiv_id}.md"
+
+    @staticmethod
+    def _extract_arxiv_id(url: str) -> str | None:
+        arxiv_url = normalize_arxiv_url(url)
+        return extract_arxiv_id(arxiv_url or "")
 
     @staticmethod
     def _relative_path(path: Path, *, start: Path) -> str:

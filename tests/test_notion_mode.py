@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import src.notion_sync.runner as notion_runner
 from src.notion_sync.config import load_config_from_env
 from src.notion_sync.notion_client import NotionClient
 from src.notion_sync.pipeline import (
@@ -13,7 +14,6 @@ from src.notion_sync.pipeline import (
     get_github_property_type,
     get_page_title,
     process_page,
-    resolve_repo_for_page,
 )
 from src.notion_sync.runner import run_notion_mode
 
@@ -171,51 +171,6 @@ async def test_ensure_sync_properties_adds_missing_github_and_stars_columns():
 
 
 @pytest.mark.anyio
-async def test_resolve_repo_for_page_prefers_existing_valid_github():
-    page = {
-        "properties": {
-            "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
-            "Github": {"type": "url", "url": "https://github.com/foo/bar"},
-        }
-    }
-    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
-
-    resolution = await resolve_repo_for_page(page, discovery_client)
-
-    assert resolution == {
-        "github_url": "https://github.com/foo/bar",
-        "source": "existing",
-        "needs_github_update": False,
-        "reason": None,
-    }
-    discovery_client.resolve_github_url.assert_not_awaited()
-
-
-@pytest.mark.anyio
-async def test_resolve_repo_for_page_uses_discovery_for_empty_github():
-    page = {
-        "properties": {
-            "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
-            "Github": {"type": "rich_text", "rich_text": []},
-            "URL": {"type": "url", "url": "https://arxiv.org/abs/2603.05078"},
-        }
-    }
-    discovery_client = types.SimpleNamespace(
-        resolve_github_url=AsyncMock(return_value="https://github.com/hf/repo")
-    )
-
-    resolution = await resolve_repo_for_page(page, discovery_client)
-
-    assert resolution == {
-        "github_url": "https://github.com/hf/repo",
-        "source": "discovered",
-        "arxiv_source": "url_field",
-        "needs_github_update": True,
-        "reason": None,
-    }
-
-
-@pytest.mark.anyio
 async def test_process_page_records_notion_update_failure_without_crashing_batch():
     page = {
         "id": "page-1",
@@ -231,6 +186,7 @@ async def test_process_page_records_notion_update_failure_without_crashing_batch
     notion_client = types.SimpleNamespace(
         update_page_properties=AsyncMock(side_effect=Exception("network down"))
     )
+    content_cache = types.SimpleNamespace(ensure_local_content_cache=AsyncMock())
     results = {"updated": 0, "skipped": []}
     lock = asyncio.Lock()
 
@@ -243,6 +199,7 @@ async def test_process_page_records_notion_update_failure_without_crashing_batch
         notion_client=notion_client,
         results=results,
         lock=lock,
+        content_cache=content_cache,
     )
 
     assert results["updated"] == 0
@@ -264,6 +221,7 @@ async def test_process_page_prints_progress_for_successful_update(capsys):
     discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
     github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(12, None)))
     notion_client = types.SimpleNamespace(update_page_properties=AsyncMock(return_value=None))
+    content_cache = types.SimpleNamespace(ensure_local_content_cache=AsyncMock())
     results = {"updated": 0, "skipped": []}
     lock = asyncio.Lock()
 
@@ -276,12 +234,14 @@ async def test_process_page_prints_progress_for_successful_update(capsys):
         notion_client=notion_client,
         results=results,
         lock=lock,
+        content_cache=content_cache,
     )
 
     captured = capsys.readouterr()
     assert "[1/1] Test Paper" in captured.out
     assert "foo/bar" in captured.out
     assert "Updated: 10 → 12" in captured.out
+    content_cache.ensure_local_content_cache.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -299,6 +259,7 @@ async def test_process_page_updates_rich_text_github_property_type():
     discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock(return_value="https://github.com/foo/bar"))
     github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(12, None)))
     notion_client = types.SimpleNamespace(update_page_properties=AsyncMock(return_value=None))
+    content_cache = types.SimpleNamespace(ensure_local_content_cache=AsyncMock())
     results = {"updated": 0, "skipped": []}
     lock = asyncio.Lock()
 
@@ -311,6 +272,7 @@ async def test_process_page_updates_rich_text_github_property_type():
         notion_client=notion_client,
         results=results,
         lock=lock,
+        content_cache=content_cache,
     )
 
     notion_client.update_page_properties.assert_awaited_once_with(
@@ -319,6 +281,139 @@ async def test_process_page_updates_rich_text_github_property_type():
         stars_count=12,
         github_property_type="rich_text",
     )
+
+
+@pytest.mark.anyio
+async def test_process_page_skips_unsupported_github_field_before_engine_runs():
+    page = {
+        "id": "page-1",
+        "url": "https://notion.so/page-1",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+            "Github": {"type": "rich_text", "rich_text": [{"plain_text": "WIP", "text": {"content": "WIP"}}]},
+            "Stars": {"type": "number", "number": 10},
+        },
+    }
+    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock())
+    notion_client = types.SimpleNamespace(update_page_properties=AsyncMock(return_value=None))
+    content_cache = types.SimpleNamespace(ensure_local_content_cache=AsyncMock())
+    results = {"updated": 0, "skipped": []}
+    lock = asyncio.Lock()
+
+    await process_page(
+        page,
+        index=1,
+        total=1,
+        discovery_client=discovery_client,
+        github_client=github_client,
+        notion_client=notion_client,
+        results=results,
+        lock=lock,
+        content_cache=content_cache,
+    )
+
+    assert results["updated"] == 0
+    assert results["skipped"] == [
+        {
+            "title": "Test Paper",
+            "github_url": None,
+            "detail_url": "https://notion.so/page-1",
+            "reason": "Unsupported Github field content",
+        }
+    ]
+    discovery_client.resolve_github_url.assert_not_awaited()
+    github_client.get_star_count.assert_not_awaited()
+    notion_client.update_page_properties.assert_not_awaited()
+    content_cache.ensure_local_content_cache.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_process_page_prefers_existing_github_without_discovery():
+    page = {
+        "id": "page-1",
+        "url": "https://notion.so/page-1",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "Test Paper"}]},
+            "Github": {"type": "url", "url": "https://github.com/foo/bar"},
+            "Stars": {"type": "number", "number": 10},
+            "URL": {"type": "url", "url": "https://arxiv.org/abs/2603.05078"},
+        },
+    }
+    discovery_client = types.SimpleNamespace(resolve_github_url=AsyncMock())
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(12, None)))
+    notion_client = types.SimpleNamespace(update_page_properties=AsyncMock(return_value=None))
+    content_cache = types.SimpleNamespace(ensure_local_content_cache=AsyncMock())
+    results = {"updated": 0, "skipped": []}
+    lock = asyncio.Lock()
+
+    await process_page(
+        page,
+        index=1,
+        total=1,
+        discovery_client=discovery_client,
+        github_client=github_client,
+        notion_client=notion_client,
+        results=results,
+        lock=lock,
+        content_cache=content_cache,
+    )
+
+    discovery_client.resolve_github_url.assert_not_awaited()
+    notion_client.update_page_properties.assert_awaited_once_with(
+        "page-1",
+        github_url=None,
+        stars_count=12,
+        github_property_type="url",
+    )
+
+
+@pytest.mark.anyio
+async def test_process_page_uses_title_search_when_github_field_is_empty():
+    page = {
+        "id": "page-1",
+        "url": "https://notion.so/page-1",
+        "properties": {
+            "Name": {"type": "title", "title": [{"plain_text": "Title Search Paper"}]},
+            "Github": {"type": "url", "url": None},
+            "Stars": {"type": "number", "number": 10},
+        },
+    }
+    discovery_client = types.SimpleNamespace(
+        huggingface_token="",
+        resolve_github_url=AsyncMock(return_value="https://github.com/foo/bar"),
+    )
+    github_client = types.SimpleNamespace(get_star_count=AsyncMock(return_value=(12, None)))
+    arxiv_client = types.SimpleNamespace(
+        get_arxiv_id_by_title=AsyncMock(return_value=("2603.05078", "title_search_arxiv", None))
+    )
+    notion_client = types.SimpleNamespace(update_page_properties=AsyncMock(return_value=None))
+    content_cache = types.SimpleNamespace(ensure_local_content_cache=AsyncMock())
+    results = {"updated": 0, "skipped": []}
+    lock = asyncio.Lock()
+
+    await process_page(
+        page,
+        index=1,
+        total=1,
+        discovery_client=discovery_client,
+        github_client=github_client,
+        notion_client=notion_client,
+        results=results,
+        lock=lock,
+        arxiv_client=arxiv_client,
+        content_cache=content_cache,
+    )
+
+    arxiv_client.get_arxiv_id_by_title.assert_awaited_once_with("Title Search Paper")
+    discovery_client.resolve_github_url.assert_awaited_once()
+    notion_client.update_page_properties.assert_awaited_once_with(
+        "page-1",
+        github_url="https://github.com/foo/bar",
+        stars_count=12,
+        github_property_type="url",
+    )
+    content_cache.ensure_local_content_cache.assert_awaited_once_with("https://arxiv.org/abs/2603.05078")
 
 
 @pytest.mark.anyio
@@ -385,3 +480,75 @@ async def test_run_notion_mode_ensures_sync_properties_before_querying_pages(mon
         ("ensure_sync_properties", "data-source-1"),
         ("query_pages", "data-source-1"),
     ]
+
+
+@pytest.mark.anyio
+async def test_run_notion_mode_builds_and_passes_content_cache(monkeypatch):
+    monkeypatch.setenv("NOTION_TOKEN", "notion_xxx")
+    monkeypatch.setenv("DATABASE_ID", "db_123")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_xxx")
+    monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf_xxx")
+
+    received = {}
+
+    async def fake_process_page(page, index, total, **kwargs):
+        received["content_cache"] = kwargs.get("content_cache")
+        received["page"] = page
+
+    monkeypatch.setattr(notion_runner, "process_page", fake_process_page)
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeArxivClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeDiscoveryClient:
+        def __init__(self, session, *, huggingface_token="", repo_cache=None, hf_exact_no_repo_recheck_days=0, max_concurrent=0, min_interval=0):
+            self.session = session
+            self.huggingface_token = huggingface_token
+
+    class FakeGitHubClient:
+        def __init__(self, session, *, github_token="", max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeContentClient:
+        def __init__(self, session, *, max_concurrent=0, min_interval=0):
+            self.session = session
+
+    class FakeNotionClient:
+        def __init__(self, token, max_concurrent):
+            self.token = token
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get_data_source_id(self, database_id):
+            return "data-source-1"
+
+        async def ensure_sync_properties(self, data_source_id):
+            return None
+
+        async def query_pages(self, data_source_id):
+            return [{"id": "page-1", "url": "https://notion.so/page-1", "properties": {}}]
+
+    exit_code = await run_notion_mode(
+        session_factory=lambda **kwargs: FakeSession(),
+        arxiv_client_cls=FakeArxivClient,
+        discovery_client_cls=FakeDiscoveryClient,
+        github_client_cls=FakeGitHubClient,
+        notion_client_cls=FakeNotionClient,
+        content_client_cls=FakeContentClient,
+    )
+
+    assert exit_code == 0
+    assert received["page"]["id"] == "page-1"
+    assert received["content_cache"] is not None

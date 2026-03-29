@@ -13,22 +13,14 @@ from src.shared.paper_identity import extract_arxiv_id
 
 class FakeContentCache:
     def __init__(self):
-        self.overview_calls: list[tuple[str, Path]] = []
-        self.abs_calls: list[tuple[str, Path]] = []
+        self.calls: list[str] = []
 
-    async def ensure_overview_path(self, url: str, *, relative_to: Path) -> str:
-        self.overview_calls.append((url, Path(relative_to)))
+    async def ensure_local_content_cache(self, url: str) -> None:
+        self.calls.append(url)
         arxiv_id = extract_arxiv_id(url)
         if not arxiv_id:
-            return ""
-        return f"cache/overview/{arxiv_id}.md"
-
-    async def ensure_abs_path(self, url: str, *, relative_to: Path) -> str:
-        self.abs_calls.append((url, Path(relative_to)))
-        arxiv_id = extract_arxiv_id(url)
-        if not arxiv_id:
-            return ""
-        return f"cache/abs/{arxiv_id}.md"
+            return None
+        return None
 
 
 @pytest.mark.anyio
@@ -111,15 +103,9 @@ async def test_update_csv_file_updates_rows_in_place_preserving_columns_and_orde
             "Tag": "C",
         },
     ]
-    assert [call[0] for call in content_cache.overview_calls] == [
-        "https://arxiv.org/abs/2603.20000v2",
-        "https://arxiv.org/pdf/2603.10000v1.pdf",
-        "https://example.com/not-arxiv",
-    ]
-    assert [call[0] for call in content_cache.abs_calls] == [
-        "https://arxiv.org/abs/2603.20000v2",
-        "https://arxiv.org/pdf/2603.10000v1.pdf",
-        "https://example.com/not-arxiv",
+    assert content_cache.calls == [
+        "https://arxiv.org/abs/2603.20000",
+        "https://arxiv.org/abs/2603.10000",
     ]
 
 
@@ -307,7 +293,7 @@ async def test_update_csv_file_fills_blank_stars_for_existing_github_without_add
 
 
 @pytest.mark.anyio
-async def test_update_csv_file_keeps_overview_and_abs_updates_when_github_discovery_misses(tmp_path: Path):
+async def test_update_csv_file_skips_content_updates_when_github_discovery_misses(tmp_path: Path):
     csv_path = tmp_path / "papers.csv"
     csv_path.write_text(
         "\n".join(
@@ -328,11 +314,12 @@ async def test_update_csv_file_keeps_overview_and_abs_updates_when_github_discov
         async def get_star_count(self, owner, repo):
             raise AssertionError("GitHub should not run when discovery finds no repo")
 
+    content_cache = FakeContentCache()
     result = await update_csv_file(
         csv_path,
         discovery_client=FakeDiscoveryClient(),
         github_client=FakeGitHubClient(),
-        content_cache=FakeContentCache(),
+        content_cache=content_cache,
     )
 
     with csv_path.open(newline="", encoding="utf-8") as handle:
@@ -349,29 +336,27 @@ async def test_update_csv_file_keeps_overview_and_abs_updates_when_github_discov
             "Stars": "",
         }
     ]
+    assert content_cache.calls == []
 
 
 @pytest.mark.anyio
-async def test_build_csv_row_outcome_runs_github_overview_and_abs_work_in_parallel(tmp_path: Path):
+async def test_build_csv_row_outcome_resolves_repo_then_warms_content_then_fetches_stars(tmp_path: Path):
+    events: list[str] = []
+
     class FakeDiscoveryClient:
         async def resolve_github_url(self, seed):
+            events.append("discovery")
             return "https://github.com/foo/bar"
 
     class FakeGitHubClient:
         async def get_star_count(self, owner, repo):
-            await asyncio.sleep(0.2)
+            events.append("stars")
             return 5, None
 
-    class SlowContentCache:
-        async def ensure_overview_path(self, url: str, *, relative_to: Path) -> str:
-            await asyncio.sleep(0.2)
-            return "cache/overview/2603.30000.md"
+    class OrderedContentCache:
+        async def ensure_local_content_cache(self, url: str) -> None:
+            events.append("content")
 
-        async def ensure_abs_path(self, url: str, *, relative_to: Path) -> str:
-            await asyncio.sleep(0.2)
-            return "cache/abs/2603.30000.md"
-
-    started_at = time.perf_counter()
     _, updated_row, outcome = await build_csv_row_outcome(
         1,
         {
@@ -382,13 +367,12 @@ async def test_build_csv_row_outcome_runs_github_overview_and_abs_work_in_parall
         },
         discovery_client=FakeDiscoveryClient(),
         github_client=FakeGitHubClient(),
-        content_cache=SlowContentCache(),
+        content_cache=OrderedContentCache(),
         csv_dir=tmp_path,
     )
-    elapsed = time.perf_counter() - started_at
 
-    assert elapsed < 0.35
     assert outcome.reason is None
+    assert events == ["discovery", "content", "stars"]
     assert "Overview" not in updated_row
     assert "Abs" not in updated_row
 
