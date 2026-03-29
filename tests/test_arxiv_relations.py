@@ -1817,6 +1817,99 @@ async def test_export_arxiv_relations_to_csv_uses_hf_fallback_for_unresolved_rel
 
 
 @pytest.mark.anyio
+async def test_export_arxiv_relations_to_csv_uses_shared_openalex_retry_after_handling(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
+    from src.shared.openalex import OpenAlexClient
+
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float):
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr("src.shared.openalex.asyncio.sleep", fake_sleep)
+
+    class FakeResponse:
+        def __init__(self, json_data=None, status=200, headers=None):
+            self.status = status
+            self._json_data = json_data or {}
+            self.headers = dict(headers or {})
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def json(self, *args, **kwargs):
+            return self._json_data
+
+    class FakeSession:
+        def __init__(self, responses):
+            self._responses = list(responses)
+            self.calls: list[dict] = []
+
+        def get(self, url, *, headers=None, params=None):
+            self.calls.append(
+                {
+                    "url": url,
+                    "headers": dict(headers or {}),
+                    "params": dict(params or {}),
+                }
+            )
+            if not self._responses:
+                raise RuntimeError("No fake response configured")
+            return self._responses.pop(0)
+
+    class FakeArxivClient:
+        async def get_title(self, arxiv_identifier: str):
+            return "Target Paper", None
+
+    async def fake_export(
+        seeds: list[PaperSeed],
+        csv_path: Path,
+        *,
+        discovery_client,
+        github_client,
+        content_cache=None,
+        status_callback=None,
+        progress_callback=None,
+    ):
+        return ConversionResult(csv_path=csv_path, resolved=len(seeds), skipped=[])
+
+    monkeypatch.setattr("src.arxiv_relations.pipeline.export_paper_seeds_to_csv", fake_export)
+
+    session = FakeSession(
+        [
+            FakeResponse(
+                {"error": "Rate limit exceeded"},
+                status=429,
+                headers={"Retry-After": "3", "X-RateLimit-Remaining": "0"},
+            ),
+            FakeResponse({"results": [{"id": "https://openalex.org/W0", "referenced_works": []}]}),
+            FakeResponse({"results": [], "meta": {"next_cursor": None}}),
+        ]
+    )
+    openalex_client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    result = await export_arxiv_relations_to_csv(
+        "https://arxiv.org/abs/2603.23502",
+        arxiv_client=FakeArxivClient(),
+        openalex_client=openalex_client,
+        discovery_client=object(),
+        github_client=object(),
+        output_dir=tmp_path,
+    )
+
+    assert sleep_calls == [3.0]
+    assert len(session.calls) == 3
+    assert result.references.resolved == 0
+    assert result.citations.resolved == 0
+
+
+@pytest.mark.anyio
 async def test_export_arxiv_relations_to_csv_rejects_invalid_single_paper_input():
     from src.arxiv_relations.pipeline import export_arxiv_relations_to_csv
 

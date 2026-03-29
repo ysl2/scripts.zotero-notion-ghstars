@@ -1,6 +1,8 @@
 import asyncio
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
@@ -16,9 +18,12 @@ OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 OPENALEX_SEARCH_PAGE_SIZE = 5
 OPENALEX_CITED_BY_PAGE_SIZE = 200
 OPENALEX_REFERENCED_WORKS_CHUNK_SIZE = 50
-OPENALEX_RETRY_STATUSES = {429, 500, 502, 503, 504}
+OPENALEX_RETRY_STATUSES = {500, 502, 503, 504}
 OPENALEX_TARGET_WORK_SELECT = "id,referenced_works"
 OPENALEX_RELATION_WORK_SELECT = "id,display_name,title,ids,doi,locations"
+OPENALEX_429_MAX_RETRIES = 3
+OPENALEX_429_FALLBACK_BACKOFF_SECONDS = 2.0
+OPENALEX_429_MAX_RETRY_AFTER_SECONDS = 15.0
 ARXIV_DOI_PATTERN = re.compile(r"10\.48550/arxiv\.([0-9]{4}\.[0-9]{4,5})(?:v\d+)?", re.IGNORECASE)
 
 
@@ -188,7 +193,10 @@ class OpenAlexClient:
         return PaperSeed(name=name, url=candidate.direct_arxiv_url)
 
     async def _get_json(self, url: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        for attempt in range(MAX_RETRIES + 1):
+        retry_attempt = 0
+        rate_limit_attempt = 0
+
+        while True:
             async with self.semaphore:
                 await self.rate_limiter.acquire()
                 try:
@@ -202,18 +210,84 @@ class OpenAlexClient:
                         if response.status == 200:
                             return await response.json()
 
-                        if response.status in OPENALEX_RETRY_STATUSES and attempt < MAX_RETRIES:
-                            await asyncio.sleep(0.5 * (2**attempt))
+                        if response.status == 429:
+                            retry_delay = await self._get_rate_limit_retry_delay(
+                                response,
+                                attempt=rate_limit_attempt,
+                            )
+                            if retry_delay is None or rate_limit_attempt >= OPENALEX_429_MAX_RETRIES:
+                                raise RuntimeError(f"OpenAlex API error ({response.status})")
+                            rate_limit_attempt += 1
+                            await asyncio.sleep(retry_delay)
+                            continue
+
+                        if response.status in OPENALEX_RETRY_STATUSES and retry_attempt < MAX_RETRIES:
+                            await asyncio.sleep(0.5 * (2**retry_attempt))
+                            retry_attempt += 1
                             continue
 
                         raise RuntimeError(f"OpenAlex API error ({response.status})")
                 except (aiohttp.ClientError, asyncio.TimeoutError):
-                    if attempt < MAX_RETRIES:
-                        await asyncio.sleep(0.5 * (2**attempt))
+                    if retry_attempt < MAX_RETRIES:
+                        await asyncio.sleep(0.5 * (2**retry_attempt))
+                        retry_attempt += 1
                         continue
                     raise
 
         raise RuntimeError("OpenAlex API request failed")
+
+    async def _get_rate_limit_retry_delay(
+        self,
+        response: aiohttp.ClientResponse,
+        *,
+        attempt: int,
+    ) -> float | None:
+        retry_after = self._parse_retry_after_header(response.headers.get("Retry-After"))
+        if retry_after is None:
+            retry_after = await self._extract_retry_after_from_payload(response)
+        if retry_after is None:
+            retry_after = OPENALEX_429_FALLBACK_BACKOFF_SECONDS * (2**attempt)
+        if retry_after > OPENALEX_429_MAX_RETRY_AFTER_SECONDS:
+            return None
+        return retry_after
+
+    @staticmethod
+    def _parse_retry_after_header(raw_value: str | None) -> float | None:
+        text = str(raw_value or "").strip()
+        if not text:
+            return None
+
+        try:
+            return max(0.0, float(text))
+        except ValueError:
+            pass
+
+        try:
+            retry_at = parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+
+    async def _extract_retry_after_from_payload(self, response: aiohttp.ClientResponse) -> float | None:
+        try:
+            payload = await response.json(content_type=None)
+        except (aiohttp.ClientError, ValueError, TypeError):
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        raw_retry_after = payload.get("retryAfter")
+        if raw_retry_after is None:
+            return None
+
+        try:
+            return max(0.0, float(raw_retry_after))
+        except (TypeError, ValueError):
+            return None
 
     def _build_headers(self) -> dict[str, str]:
         headers = {"User-Agent": "scripts.ghstars"}

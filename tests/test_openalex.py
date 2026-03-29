@@ -5,9 +5,10 @@ from src.shared.papers import PaperSeed
 
 
 class FakeResponse:
-    def __init__(self, json_data=None, status=200):
+    def __init__(self, json_data=None, status=200, headers=None):
         self.status = status
         self._json_data = json_data or {}
+        self.headers = dict(headers or {})
 
     async def __aenter__(self):
         return self
@@ -15,7 +16,7 @@ class FakeResponse:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def json(self):
+    async def json(self, *args, **kwargs):
         return self._json_data
 
 
@@ -361,6 +362,89 @@ async def test_query_params_include_openalex_api_key_when_present():
     await client.search_first_work("title")
 
     assert session.calls[0]["params"]["api_key"] == "oa_key"
+
+
+@pytest.mark.anyio
+async def test_title_search_honors_short_retry_after_header_on_429(monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float):
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr("src.shared.openalex.asyncio.sleep", fake_sleep)
+
+    session = FakeSession(
+        [
+            FakeResponse(
+                {"error": "Rate limit exceeded"},
+                status=429,
+                headers={"Retry-After": "3", "X-RateLimit-Remaining": "0"},
+            ),
+            FakeResponse({"results": [{"id": "W1", "referenced_works": []}]}),
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    result = await client.search_first_work("title")
+
+    assert result == {"id": "W1", "referenced_works": []}
+    assert len(session.calls) == 2
+    assert sleep_calls == [3.0]
+
+
+@pytest.mark.anyio
+async def test_title_search_falls_back_to_retry_after_from_429_body(monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float):
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr("src.shared.openalex.asyncio.sleep", fake_sleep)
+
+    session = FakeSession(
+        [
+            FakeResponse(
+                {"error": "Rate limit exceeded", "retryAfter": 4},
+                status=429,
+            ),
+            FakeResponse({"results": [{"id": "W1", "referenced_works": []}]}),
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    result = await client.search_first_work("title")
+
+    assert result == {"id": "W1", "referenced_works": []}
+    assert len(session.calls) == 2
+    assert sleep_calls == [4.0]
+
+
+@pytest.mark.anyio
+async def test_title_search_stops_retrying_when_retry_after_exceeds_bounded_limit(monkeypatch):
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float):
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr("src.shared.openalex.asyncio.sleep", fake_sleep)
+
+    session = FakeSession(
+        [
+            FakeResponse(
+                {"error": "Rate limit exceeded", "retryAfter": 55035},
+                status=429,
+                headers={"Retry-After": "55035", "X-RateLimit-Remaining": "0"},
+            ),
+            FakeResponse({"results": [{"id": "W-should-not-run"}]}),
+        ]
+    )
+    client = OpenAlexClient(session, min_interval=0, max_concurrent=1)
+
+    with pytest.raises(RuntimeError, match=r"OpenAlex API error \(429\)"):
+        await client.search_first_work("title")
+
+    assert len(session.calls) == 1
+    assert sleep_calls == []
 
 
 def test_normalizes_related_work_from_location_url():
